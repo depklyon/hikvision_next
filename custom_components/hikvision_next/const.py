@@ -23,6 +23,13 @@ ACTION_ISAPI_REQUEST = "isapi_request"
 ACTION_UPDATE_SNAPSHOT = "update_snapshot"
 
 HIKVISION_EVENT = f"{DOMAIN}_event"
+HIKVISION_EVENT_IMAGE_UPDATED = f"{DOMAIN}_event_image_updated"
+
+ATTR_LAST_EVENT_RECEIVED_AT = "last_event_received_at"
+ATTR_LAST_IMAGE_CONTENT_TYPE = "last_image_content_type"
+ATTR_LAST_IMAGE_PATH = "last_image_path"
+ATTR_LAST_IMAGE_SIZE = "last_image_size"
+ATTR_LAST_IMAGE_URL = "last_image_url"
 
 EVENTS = {
     "motiondetection": {
@@ -47,6 +54,10 @@ EVENTS = {
     },
     "linedetection": {
         **ISAPI_EVENTS["linedetection"],
+        "device_class": BinarySensorDeviceClass.MOTION,
+    },
+    "facedetection": {
+        **ISAPI_EVENTS["facedetection"],
         "device_class": BinarySensorDeviceClass.MOTION,
     },
     "regionentrance": {

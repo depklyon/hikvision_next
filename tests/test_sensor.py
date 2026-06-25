@@ -4,6 +4,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import homeassistant.helpers.entity_registry as er
+from homeassistant.util import slugify
 
 
 @pytest.mark.parametrize("init_integration", ["DS-7608NXI-I2"], indirect=True)
@@ -69,3 +70,25 @@ async def test_scenechange_support(
     for entity_id in entities:
         assert (entity := entity_registry.async_get(entity_id))
         assert entity.disabled == data["disabled"]
+
+
+@pytest.mark.parametrize("init_integration", ["iDS-7204HUHI-M1"], indirect=True)
+async def test_facedetection_entities(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test face detection is exposed as sensor, switch, and image entities."""
+
+    device = init_integration.runtime_data
+    serial_no = slugify(device.device_info.serial_no.lower())
+    entity_registry = er.async_get(hass)
+
+    face_events = [event for camera in device.cameras for event in camera.events_info if event.id == "facedetection"]
+    assert face_events
+
+    channel_id = face_events[0].channel_id
+    for platform in ("binary_sensor", "switch", "image"):
+        entity_id = f"{platform}.{serial_no}_{channel_id}_facedetection"
+        if platform == "image":
+            entity_id = f"{entity_id}_last_image"
+        assert entity_registry.async_get(entity_id)

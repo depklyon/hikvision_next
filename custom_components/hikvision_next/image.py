@@ -2,22 +2,23 @@
 
 from datetime import datetime
 import logging
+from pathlib import Path
 
 import voluptuous as vol
 
 from homeassistant.components.camera import Camera
 from homeassistant.components.image import ImageEntity
 from homeassistant.const import ATTR_ENTITY_ID, CONF_FILENAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.template import Template
 from homeassistant.util import slugify
 
 from . import HikvisionConfigEntry
-from .const import ACTION_UPDATE_SNAPSHOT
+from .const import DOMAIN, ACTION_UPDATE_SNAPSHOT, HIKVISION_EVENT_IMAGE_UPDATED
 from .hikvision_device import HikvisionDevice
-from .isapi import CameraStreamInfo
+from .isapi import AnalogCamera, CameraStreamInfo, EventInfo, IPCamera
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ async def async_setup_entry(
         for stream in camera.streams:
             if stream.type_id == 1:
                 entities.append(SnapshotFile(hass, device, camera, stream))
+        for event in camera.events_info:
+            entities.append(EventImage(hass, device, camera, event))
 
     async_add_entities(entities)
 
@@ -89,3 +92,80 @@ class SnapshotFile(ImageEntity):
         self.file_path = filename.async_render(variables={ATTR_ENTITY_ID: self.entity_id})
         self._attr_image_last_updated = datetime.now()
         self.schedule_update_ha_state()
+
+
+class EventImage(ImageEntity):
+    """An entity for displaying the last event image."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        device: HikvisionDevice,
+        camera: AnalogCamera | IPCamera,
+        event: EventInfo,
+    ) -> None:
+        """Initialize the event image."""
+
+        ImageEntity.__init__(self, hass)
+
+        self.device = device
+        self.camera = camera
+        self.event = event
+        self._attr_device_info = device.hass_device_info(camera.id)
+        self._attr_unique_id = slugify(f"{device.device_info.serial_no.lower()}_{camera.id}_{event.id}_last_image")
+        self.entity_id = f"image.{self.unique_id}"
+        self._attr_translation_key = "event_image"
+        self._attr_translation_placeholders = {
+            "camera": camera.name,
+            "event": event.id,
+        }
+        self._attr_entity_registry_enabled_default = not event.disabled
+
+    async def async_added_to_hass(self) -> None:
+        """Listen for event image updates."""
+
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                HIKVISION_EVENT_IMAGE_UPDATED,
+                self._handle_event_image_updated,
+            )
+        )
+
+    @callback
+    def _handle_event_image_updated(self, event: Event) -> None:
+        """Handle event image update signal."""
+
+        if event.data.get("unique_id") != self.unique_id:
+            return
+        self._attr_image_last_updated = datetime.now()
+        self.schedule_update_ha_state()
+
+    @property
+    def file_path(self) -> Path:
+        """Return latest image path."""
+
+        base_path = Path(
+            self.hass.config.path(
+                "www",
+                DOMAIN,
+                self.device.entry.entry_id,
+                f"channel_{self.camera.id}",
+            )
+        )
+        for extension in ("jpeg", "jpg", "png", "webp", "gif"):
+            path = base_path / f"{self.event.id}.{extension}"
+            if path.exists():
+                return path
+        return base_path / f"{self.event.id}.jpeg"
+
+    def image(self) -> bytes | None:
+        """Return bytes of image."""
+
+        try:
+            path = self.file_path
+            self._attr_image_last_updated = datetime.fromtimestamp(path.stat().st_mtime)
+            return path.read_bytes()
+        except FileNotFoundError:
+            return None

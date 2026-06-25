@@ -46,6 +46,9 @@
       "linedetection": {
         "name": "Line Crossing"
       },
+      "facedetection": {
+        "name": "Face Detection"
+      },
       "regionentrance": {
         "name": "Region Entrance"
       },
@@ -80,6 +83,9 @@
       },
       "linedetection": {
         "name": "Line Crossing Detection"
+      },
+      "facedetection": {
+        "name": "Face Detection"
       },
       "regionentrance": {
         "name": "Region Entrance Detection"
@@ -122,6 +128,9 @@
     "image": {
       "snapshot": {
         "name": "{camera} Snapshot"
+      },
+      "event_image": {
+        "name": "{camera} {event} Last Image"
       }
     }
   }

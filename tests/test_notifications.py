@@ -1,10 +1,19 @@
 """Test event notifications."""
 
+import asyncio
 import pytest
 from http import HTTPStatus
+from pathlib import Path
 from homeassistant.core import HomeAssistant, Event
-from custom_components.hikvision_next.notifications import EventNotificationsView
-from custom_components.hikvision_next.const import HIKVISION_EVENT, RTSP_PORT_FORCED
+from custom_components.hikvision_next.notifications import EventImage, EventNotificationsView
+from custom_components.hikvision_next.const import (
+    ATTR_LAST_IMAGE_CONTENT_TYPE,
+    ATTR_LAST_IMAGE_PATH,
+    ATTR_LAST_IMAGE_SIZE,
+    ATTR_LAST_IMAGE_URL,
+    HIKVISION_EVENT,
+    RTSP_PORT_FORCED,
+)
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from unittest.mock import MagicMock
 from tests.conftest import load_fixture, TEST_HOST_IP, TEST_CONFIG, TEST_CONFIG_OUTSIDE_NETWORK
@@ -25,6 +34,41 @@ def mock_event_notification(file) -> MagicMock:
     async def read():
         payload = load_fixture("ISAPI/EventNotificationAlert", file)
         return payload.encode()
+    mock_request.read = read
+    return mock_request
+
+
+def mock_multipart_event_notification(file, image: bytes = b"binary image data") -> MagicMock:
+    """Mock incoming multipart event notification request with an image."""
+
+    boundary = "hikvision-boundary"
+    xml = load_fixture("ISAPI/EventNotificationAlert", file).encode()
+    payload = b"\r\n".join(
+        [
+            f"--{boundary}".encode(),
+            b'Content-Disposition: form-data; name="event.xml"; filename="event.xml"',
+            b"Content-Type: application/xml",
+            b"",
+            xml,
+            f"--{boundary}".encode(),
+            b'Content-Disposition: form-data; name="image.jpg"; filename="image.jpg"',
+            b"Content-Type: image/jpeg",
+            b"",
+            image,
+            f"--{boundary}--".encode(),
+            b"",
+        ]
+    )
+
+    mock_request = MagicMock()
+    mock_request.headers = {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    mock_request.remote = TEST_HOST_IP
+
+    async def read():
+        return payload
+
     mock_request.read = read
     return mock_request
 
@@ -58,6 +102,71 @@ async def test_nvr_intrusion_detection_alert(
     assert data["channel_id"] == 2
     assert data["event_id"] == "fielddetection"
     assert data["camera_name"] == "home"
+
+
+@pytest.mark.parametrize("init_integration", ["DS-7608NXI-I2"], indirect=True)
+async def test_event_notification_with_image_updates_sensor_attributes(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test incoming event image is saved and linked to the sensor."""
+
+    entity_id = "binary_sensor.ds_7608nxi_i0_0p_s0000000000ccrrj00000000wcvu_2_fielddetection"
+    image = b"binary image data"
+
+    view = EventNotificationsView(hass)
+    mock_request = mock_multipart_event_notification("nvr_2_fielddetection", image)
+    response = await view.post(mock_request)
+
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+    assert sensor.attributes[ATTR_LAST_IMAGE_CONTENT_TYPE] == "image/jpeg"
+    assert sensor.attributes[ATTR_LAST_IMAGE_SIZE] == len(image)
+    assert sensor.attributes[ATTR_LAST_IMAGE_URL].endswith("/channel_2/fielddetection.jpeg")
+    assert Path(sensor.attributes[ATTR_LAST_IMAGE_PATH]).read_bytes() == image
+
+
+@pytest.mark.parametrize("init_integration", ["DS-7608NXI-I2"], indirect=True)
+async def test_event_notification_snapshot_fallback_is_background(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test fallback snapshot does not delay sensor state update."""
+
+    entity_id = "binary_sensor.ds_7608nxi_i0_0p_s0000000000ccrrj00000000wcvu_2_fielddetection"
+    image = b"fallback image data"
+    snapshot_allowed = asyncio.Event()
+    bus_events = []
+
+    def bus_event_listener(event: Event) -> None:
+        bus_events.append(event)
+
+    hass.bus.async_listen(HIKVISION_EVENT, bus_event_listener)
+
+    view = EventNotificationsView(hass)
+
+    async def fetch_event_snapshot(device, alert):
+        await snapshot_allowed.wait()
+        return EventImage(content=image, content_type="image/jpeg", extension="jpeg")
+
+    view.fetch_event_snapshot = fetch_event_snapshot
+
+    response = await view.post(mock_event_notification("nvr_2_fielddetection"))
+
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+    assert ATTR_LAST_IMAGE_PATH not in sensor.attributes
+
+    snapshot_allowed.set()
+    await hass.async_block_till_done()
+
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.attributes[ATTR_LAST_IMAGE_CONTENT_TYPE] == "image/jpeg"
+    assert sensor.attributes[ATTR_LAST_IMAGE_SIZE] == len(image)
+    assert Path(sensor.attributes[ATTR_LAST_IMAGE_PATH]).read_bytes() == image
+    assert len(bus_events) == 1
 
 
 @pytest.mark.parametrize("init_integration", ["DS-2CD2386G2-IU"], indirect=True)

@@ -46,6 +46,12 @@ EVENTS = {
         "slug": "LineDetection",
         "mutex": True,
     },
+    "facedetection": {
+        "type": EVENT_SMART,
+        "label": "Face Detection",
+        "slug": "FaceDetection",
+        "mutex": True,
+    },
     "regionentrance": {
         "type": EVENT_SMART,
         "label": "Region Entrance",
