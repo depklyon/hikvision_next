@@ -1,6 +1,6 @@
 # Hikvision Next
 
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/maciej-or/hikvision_next?style=flat-square) [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/depklyon/hikvision_next?style=flat-square) [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
 The Home Assistant integration for Hikvision NVRs and IP cameras. Receives and switches detection of alarm events. Provides video streams.
 
@@ -25,6 +25,7 @@ The Home Assistant integration for Hikvision NVRs and IP cameras. Receives and s
 - Scene Change
 - Intrusion (Field Detection)
 - Line Crossing
+- Face Detection
 - Region Entrance
 - Region Exiting
 - NVR Input Triggers
@@ -39,13 +40,13 @@ Events must be set to alert the surveillance center in Linkage Action for Home A
 
 Creates automation that allows to take snapshots from selected cameras when an event sensor is triggered.
 
-[<img src="https://my.home-assistant.io/badges/blueprint_import.svg">](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com/maciej-or/hikvision_next/blob/main/blueprints/take_pictures_on_motion_detection.yaml)
+[<img src="https://my.home-assistant.io/badges/blueprint_import.svg">](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com/depklyon/hikvision_next/blob/main/blueprints/take_pictures_on_motion_detection.yaml)
 
 #### Display Sensor State On Hikvision Video
 
 Creates an automation that allows to display text overlay on a selected video stream with the state of a selected sensor. Refreshes every 15 minutes.
 
-[<img src="https://my.home-assistant.io/badges/blueprint_import.svg">](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com/maciej-or/hikvision_next/blob/main/blueprints/display_sensor_state_on_hikvision_video.yaml)
+[<img src="https://my.home-assistant.io/badges/blueprint_import.svg">](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com/depklyon/hikvision_next/blob/main/blueprints/display_sensor_state_on_hikvision_video.yaml)
 
 ## Preview
 
@@ -59,11 +60,11 @@ The scope supported features depends on device model, setup and firmware version
 
 ## Installation
 
-[<img src="https://my.home-assistant.io/badges/hacs_repository.svg">](https://my.home-assistant.io/redirect/hacs_repository/?owner=maciej-or&repository=hikvision_next&category=integration)
+[<img src="https://my.home-assistant.io/badges/hacs_repository.svg">](https://my.home-assistant.io/redirect/hacs_repository/?owner=depklyon&repository=hikvision_next&category=integration)
 
 ### With HACS
 
-1. This integration you will find in the default HACS store. Search for `Hikvision NVR / IP Camera` on `HACS / Integrations` page and press `Download` button
+1. Add `https://github.com/depklyon/hikvision_next` as a HACS custom repository with category `Integration`, then search for `Hikvision NVR / IP Camera` on `HACS / Integrations` page and press `Download` button
 2. on `Settings / Devices & Services` page press `+ Add Integration`
 3. Search for `Hikvision NVR / IP Camera` and add your Hikvision device using config dialog, repeat the last 2 steps for more devices
 
