@@ -1,17 +1,181 @@
 {
   "config": {
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Re-configuration was successful"
+    },
     "step": {
       "user": {
+        "description": "Please enter credentials to NVR or IP camera",
         "data": {
-          "host": "[%key:common::config_flow::data::host%]"
+          "host": "URL",
+          "password": "Password",
+          "username": "Username",
+          "verify_ssl": "Verify SSL certificate (uncheck for self-signed certificate)",
+          "rtsp_port_forced": "Force RTSP port (Optional)",
+          "set_alarm_server": "Set notifications host using following address:",
+          "alarm_server": "Home Assistant address accessible by Hikvison device"
         }
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "insufficient_permission": "[%key:common::config_flow::error::insufficient_permission%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "insufficient_permission": "Access forbidden, check user permissions",
+      "unknown": "Unexpected error"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "motiondetection": {
+        "name": "Motion"
+      },
+      "tamperdetection": {
+        "name": "Video Tampering"
+      },
+      "videoloss": {
+        "name": "Video Loss"
+      },
+      "scenechangedetection": {
+        "name": "Scene Change"
+      },
+      "fielddetection": {
+        "name": "Intrusion"
+      },
+      "linedetection": {
+        "name": "Line Crossing"
+      },
+      "facedetection": {
+        "name": "Face Detection"
+      },
+      "regionentrance": {
+        "name": "Region Entrance"
+      },
+      "regionexiting": {
+        "name": "Region Exiting"
+      },
+      "io": {
+        "name": "Alarm Input {io_port_id}"
+      }
+    },
+    "switch": {
+      "alarm_output": {
+        "name": "Alarm Output {port_no}"
+      },
+      "holiday_mode": {
+        "name": "Holiday Mode"
+      },
+      "motiondetection": {
+        "name": "Motion Detection"
+      },
+      "tamperdetection": {
+        "name": "Video Tampering Detection"
+      },
+      "videoloss": {
+        "name": "Video Loss Detection"
+      },
+      "scenechangedetection": {
+        "name": "Scene Change Detection"
+      },
+      "fielddetection": {
+        "name": "Intrusion Detection"
+      },
+      "linedetection": {
+        "name": "Line Crossing Detection"
+      },
+      "facedetection": {
+        "name": "Face Detection"
+      },
+      "regionentrance": {
+        "name": "Region Entrance Detection"
+      },
+      "regionexiting": {
+        "name": "Region Exiting Detection"
+      },
+      "io": {
+        "name": "Alarm Input {io_port_id}"
+      }
+    },
+    "camera": {
+      "stream1": {
+        "name": "Main Stream"
+      },
+      "stream2": {
+        "name": "Sub-Stream"
+      },
+      "stream3": {
+        "name": "Main Stream (Event)"
+      },
+      "stream4": {
+        "name": "Transcoded Stream"
+      }
+    },
+    "sensor": {
+      "notifications_host_protocol_type": {
+        "name": "Notifications Host Protocol"
+      },
+      "notifications_host_address": {
+        "name": "Notifications Host"
+      },
+      "notifications_host_port_no": {
+        "name": "Notifications Host Port"
+      },
+      "notifications_host_path": {
+        "name": "Notifications Host Path"
+      }
+    },
+    "image": {
+      "snapshot": {
+        "name": "{camera} Snapshot"
+      },
+      "event_image": {
+        "name": "{camera} {event} Last Image"
+      }
+    }
+  },
+  "services": {
+    "update_snapshot": {
+      "name": "Update snapshot",
+      "description": "Update the snapshot file in an image entity. Used by take_pictures_on_motion_detection blueprint.",
+      "fields": {
+        "filename": {
+          "name": "Filename",
+          "description": "The filename of the snapshot to display."
+        }
+      }
+    },
+    "reboot": {
+      "name": "Reboot",
+      "description": "Reboot the device.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Device",
+          "description": "Permission needed - Remote: Shutdown/Reboot"
+        }
+      }
+    },
+    "isapi_request": {
+      "name": "ISAPI request",
+      "description": "Send a custom ISAPI request to the device.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Device",
+          "description": "The Hikvision device."
+        },
+        "method": {
+          "name": "HTTP method",
+          "description": "WARNING: You do POST and PUT at your own risk!"
+        },
+        "path": {
+          "name": "ISAPI path",
+          "description": "The ISAPI endpoint to request. Example: /System/deviceInfo"
+        },
+        "payload": {
+          "name": "Request payload",
+          "description": "XML data"
+        }
+      }
     }
   }
 }

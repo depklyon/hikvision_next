@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.switch import ENTITY_ID_FORMAT, SwitchEntity
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -59,7 +59,7 @@ class EventSwitch(CoordinatorEntity, SwitchEntity):
     def __init__(self, device_id: int, event: EventInfo, coordinator) -> None:
         """Initialize."""
         super().__init__(coordinator)
-        self.entity_id = ENTITY_ID_FORMAT.format(event.unique_id)
+        self.entity_id = f"switch.{event.unique_id}"
         self._attr_unique_id = self.entity_id
         self._attr_device_info = coordinator.device.hass_device_info(device_id)
         self._attr_translation_key = event.id
@@ -105,8 +105,8 @@ class NVROutputSwitch(CoordinatorEntity, SwitchEntity):
     def __init__(self, coordinator, port_no: int) -> None:
         """Initialize."""
         super().__init__(coordinator)
-        self.entity_id = ENTITY_ID_FORMAT.format(
-            f"{slugify(coordinator.device.device_info.serial_no.lower())}_{port_no}_alarm_output"
+        self.entity_id = (
+            f"switch.{slugify(coordinator.device.device_info.serial_no.lower())}_{port_no}_alarm_output"
         )
         self._attr_unique_id = self.entity_id
         self._attr_device_info = coordinator.device.hass_device_info(0)
@@ -147,7 +147,7 @@ class HolidaySwitch(CoordinatorEntity, SwitchEntity):
         """Initialize."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{slugify(coordinator.device.device_info.serial_no.lower())}_{HOLIDAY_MODE}"
-        self.entity_id = ENTITY_ID_FORMAT.format(self.unique_id)
+        self.entity_id = f"switch.{self.unique_id}"
         self._attr_device_info = coordinator.device.hass_device_info()
 
     @property

@@ -6,11 +6,9 @@ import asyncio
 from contextlib import suppress
 import logging
 import traceback
+from typing import Any
+
 from homeassistant.util import slugify
-from homeassistant.components.binary_sensor import (
-    ENTITY_ID_FORMAT as BINARY_SENSOR_ENTITY_ID_FORMAT,
-)
-from homeassistant.components.switch import ENTITY_ID_FORMAT as SWITCH_ENTITY_ID_FORMAT
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -53,7 +51,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
         await device.get_hardware_info()
         device_info = device.hass_device_info()
         device_registry = dr.async_get(hass)
-        device_registry.async_get_or_create(config_entry_id=entry.entry_id, **device_info)
+        device_entry = device_registry.async_get_or_create(config_entry_id=entry.entry_id, **device_info)
+        device.device_id = device_entry.id
     except ISAPIUnauthorizedError as ex:
         raise ConfigEntryAuthFailed from ex
     except Exception as ex:  # pylint: disable=broad-except
@@ -78,7 +77,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
     return True
 
 
-async def async_remove_config_entry_device(hass: HomeAssistant, config_entry, device_entry) -> bool:
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
     """Delete device if not entities."""
     if not device_entry.via_device_id:
         _LOGGER.error(
@@ -90,19 +91,12 @@ async def async_remove_config_entry_device(hass: HomeAssistant, config_entry, de
 
 async def async_unload_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) -> bool:
     """Unload a config entry."""
-
-    # Unload a config entry
-    unload_ok = all(
-        await asyncio.gather(
-            *[hass.config_entries.async_forward_entry_unload(entry, platform) for platform in PLATFORMS]
-        )
-    )
-
-    # Reset alarm server after it has been set
-    device = entry.runtime_data
-    if device.control_alarm_server_host:
-        with suppress(Exception):
-            await device.set_alarm_server("http://0.0.0.0:80", "/")
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        # Reset alarm server after it has been set
+        device = entry.runtime_data
+        if device.control_alarm_server_host:
+            with suppress(Exception):
+                await device.set_alarm_server("http://0.0.0.0:80", "/")
 
     return unload_ok
 
@@ -113,24 +107,27 @@ def get_first_instance_unique_id(hass: HomeAssistant) -> int:
     return entry.unique_id
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
-    _LOGGER.debug("Migrating from version %s", config_entry.version)
+    _LOGGER.debug(
+        "Migrating from version %s.%s",
+        config_entry.version,
+        config_entry.minor_version,
+    )
 
     # 1 -> 2: Config entry unique_id format changed
     if config_entry.version == 1:
         unique_id = config_entry.unique_id
+        new_unique_id = None
         if isinstance(unique_id, list) and len(unique_id) == 1 and isinstance(unique_id[0], list):
             new_unique_id = unique_id[0][1]
-            hass.config_entries.async_update_entry(
-                config_entry,
-                data={**config_entry.data},
-                unique_id=new_unique_id,
-            )
 
-        config_entry.version = 2
+        updates: dict[str, Any] = {"version": 2}
+        if new_unique_id:
+            updates["unique_id"] = new_unique_id
+        hass.config_entries.async_update_entry(config_entry, **updates)
 
-    # 2 -> 3: Delete previous alaram server sensor entities
+    # 2 -> 3: Delete previous alarm server sensor entities
     if config_entry.version == 2:
         old_keys = ["protocoltype", "ipaddress", "portno", "url"]
         entity_registry = er.async_get(hass)
@@ -154,24 +151,27 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     return True
 
 
-def refresh_disabled_entities_in_registry(hass: HomeAssistant, device: HikvisionDevice):
+def refresh_disabled_entities_in_registry(hass: HomeAssistant, device: HikvisionDevice) -> None:
     """Set disable state according to Notify Surveillance Center flag."""
 
-    def update_entity(event, ENTITY_ID_FORMAT):
-        entity_id = ENTITY_ID_FORMAT.format(event.unique_id)
+    def update_entity(event, platform: Platform) -> None:
+        entity_id = f"{platform}.{event.unique_id}"
         entity = entity_registry.async_get(entity_id)
+        if not entity:
+            if reg_entity_id := entity_registry.async_get_entity_id(platform, DOMAIN, entity_id):
+                entity = entity_registry.async_get(reg_entity_id)
         if not entity:
             return
         if entity.disabled != event.disabled:
             disabled_by = er.RegistryEntryDisabler.INTEGRATION if event.disabled else None
-            entity_registry.async_update_entity(entity_id, disabled_by=disabled_by)
+            entity_registry.async_update_entity(entity.entity_id, disabled_by=disabled_by)
 
     entity_registry = er.async_get(hass)
     for camera in device.cameras:
         for event in camera.events_info:
-            update_entity(event, SWITCH_ENTITY_ID_FORMAT)
-            update_entity(event, BINARY_SENSOR_ENTITY_ID_FORMAT)
+            update_entity(event, Platform.SWITCH)
+            update_entity(event, Platform.BINARY_SENSOR)
 
     for event in device.events_info:
-        update_entity(event, SWITCH_ENTITY_ID_FORMAT)
-        update_entity(event, BINARY_SENSOR_ENTITY_ID_FORMAT)
+        update_entity(event, Platform.SWITCH)
+        update_entity(event, Platform.BINARY_SENSOR)

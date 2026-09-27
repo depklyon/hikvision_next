@@ -50,6 +50,7 @@ class HikvisionDevice(ISAPIClient):
         config = entry.data if entry else data
         self.entry = entry
         self.hass = hass
+        self.device_id: str | None = None
         self.auth_token_expired = False
         self.control_alarm_server_host = config[CONF_SET_ALARM_SERVER]
         self.alarm_server_host = config[CONF_ALARM_SERVER_HOST]
@@ -105,14 +106,16 @@ class HikvisionDevice(ISAPIClient):
             camera_info = self.get_camera_by_id(camera_id)
             is_ip_camera = isinstance(camera_info, IPCamera)
 
-            return DeviceInfo(
+            device_info = DeviceInfo(
                 manufacturer=self.device_info.manufacturer,
                 identifiers={(DOMAIN, camera_info.serial_no)},
                 model=camera_info.model,
                 name=camera_info.name,
                 sw_version=camera_info.firmware if is_ip_camera else "Unknown",
-                via_device=(DOMAIN, self.device_info.serial_no) if self.device_info.is_nvr else None,
             )
+            if self.device_info.is_nvr:
+                device_info["via_device"] = (DOMAIN, self.device_info.serial_no)
+            return device_info
 
     def get_device_event_capabilities(
         self,

@@ -18,7 +18,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import CONTENT_TYPE_TEXT_PLAIN, STATE_ON, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_registry import async_get
-from homeassistant.util import slugify
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     ALARM_SERVER_PATH,
@@ -315,7 +315,7 @@ class EventNotificationsView(HomeAssistantView):
             entity = self.hass.states.get(entity_id)
             if entity:
                 attributes = dict(entity.attributes)
-                attributes[ATTR_LAST_EVENT_RECEIVED_AT] = datetime.now().isoformat()
+                attributes[ATTR_LAST_EVENT_RECEIVED_AT] = dt_util.utcnow().isoformat()
                 if stored_image:
                     attributes[ATTR_LAST_IMAGE_PATH] = stored_image.path
                     attributes[ATTR_LAST_IMAGE_URL] = stored_image.url
@@ -382,7 +382,7 @@ class EventNotificationsView(HomeAssistantView):
             message["last_image_path"] = stored_image.path
             message["last_image_url"] = stored_image.url
 
-        self.hass.bus.fire(
+        self.hass.bus.async_fire(
             HIKVISION_EVENT,
             message,
         )

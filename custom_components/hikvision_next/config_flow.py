@@ -34,6 +34,7 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for hikvision device."""
 
     VERSION = 3
+    MINOR_VERSION = 1
     _entry: HikvisionConfigEntry
 
     async def get_schema(self, user_input: dict[str, Any]):
@@ -94,7 +95,10 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 if self.source == SOURCE_REAUTH:
                     self._abort_if_unique_id_mismatch()
-                    return self.async_update_reload_and_abort(entry=self._entry, data=user_input_validated)
+                    return self.async_update_reload_and_abort(
+                        self._entry,
+                        data_updates=user_input_validated,
+                    )
 
                 # add new device
                 await self.async_set_unique_id(device.device_info.serial_no)
@@ -105,12 +109,12 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = await self.get_schema(user_input)
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
-    async def async_step_reconfigure(self, user_input: Mapping[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle device re-configuration."""
         self._entry = self._get_reconfigure_entry()
-        return await self.async_step_user()
+        return await self.async_step_user(user_input)
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Perform reauth upon an authorization error."""
         self._entry = self._get_reauth_entry()
         return await self.async_step_user()
