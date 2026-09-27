@@ -1,0 +1,61 @@
+{
+  "entity": {
+    "sensor": {
+      "notifications_host_protocol_type": {
+        "default": "mdi:ip-network"
+      },
+      "notifications_host_address": {
+        "default": "mdi:ip-network"
+      },
+      "notifications_host_port_no": {
+        "default": "mdi:ip-network"
+      },
+      "notifications_host_path": {
+        "default": "mdi:ip-network"
+      }
+    },
+    "switch": {
+      "alarm_output": {
+        "default": "mdi:eye-outline"
+      },
+      "holiday_mode": {
+        "default": "mdi:palm-tree"
+      },
+      "motiondetection": {
+        "default": "mdi:eye-outline"
+      },
+      "tamperdetection": {
+        "default": "mdi:eye-outline"
+      },
+      "videoloss": {
+        "default": "mdi:eye-outline"
+      },
+      "scenechangedetection": {
+        "default": "mdi:eye-outline"
+      },
+      "fielddetection": {
+        "default": "mdi:eye-outline"
+      },
+      "linedetection": {
+        "default": "mdi:eye-outline"
+      },
+      "facedetection": {
+        "default": "mdi:eye-outline"
+      },
+      "regionentrance": {
+        "default": "mdi:eye-outline"
+      },
+      "regionexiting": {
+        "default": "mdi:eye-outline"
+      },
+      "io": {
+        "default": "mdi:eye-outline"
+      }
+    }
+  },
+  "services": {
+    "update_snapshot": "mdi:camera-iris",
+    "reboot": "mdi:restart",
+    "isapi_request": "mdi:code-json"
+  }
+}

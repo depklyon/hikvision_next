@@ -1,8 +1,9 @@
-"Integration actions."
+from __future__ import annotations
 
 from httpx import HTTPStatusError
 import voluptuous as vol
 
+from homeassistant.const import CONF_FILENAME, Platform
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -10,8 +11,15 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 
-from .const import ACTION_ISAPI_REQUEST, ACTION_REBOOT, ATTR_CONFIG_ENTRY_ID, DOMAIN
+from .const import (
+    ACTION_ISAPI_REQUEST,
+    ACTION_REBOOT,
+    ACTION_UPDATE_SNAPSHOT,
+    ATTR_CONFIG_ENTRY_ID,
+    DOMAIN,
+)
 from .isapi import ISAPIForbiddenError, ISAPIUnauthorizedError
 
 ACTION_ISAPI_REQUEST_SCHEMA = vol.Schema(
@@ -31,6 +39,8 @@ def setup_services(hass: HomeAssistant) -> None:
         """Handle the reboot action call."""
         entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)
         entry = hass.config_entries.async_get_entry(entry_id)
+        if not entry:
+            raise HomeAssistantError(f"Config entry '{entry_id}' not found")
         device = entry.runtime_data
         try:
             await device.reboot()
@@ -41,6 +51,8 @@ def setup_services(hass: HomeAssistant) -> None:
         """Handle the custom ISAPI request action call."""
         entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)
         entry = hass.config_entries.async_get_entry(entry_id)
+        if not entry:
+            raise HomeAssistantError(f"Config entry '{entry_id}' not found")
         device = entry.runtime_data
         method = call.data.get("method", "POST")
         path = call.data["path"].strip("/")
@@ -66,3 +78,18 @@ def setup_services(hass: HomeAssistant) -> None:
         schema=ACTION_ISAPI_REQUEST_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
+
+    try:
+        from homeassistant.helpers.service import async_register_platform_entity_service
+    except ImportError:
+        async_register_platform_entity_service = None
+
+    if async_register_platform_entity_service:
+        async_register_platform_entity_service(
+            hass,
+            DOMAIN,
+            ACTION_UPDATE_SNAPSHOT,
+            entity_domain=Platform.IMAGE,
+            schema={vol.Required(CONF_FILENAME): cv.template},
+            func="update_snapshot_filename",
+        )

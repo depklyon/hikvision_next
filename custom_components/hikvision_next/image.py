@@ -1,19 +1,20 @@
 """Image entities with camera snapshots."""
 
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 
 import voluptuous as vol
 
-from homeassistant.components.camera import Camera
 from homeassistant.components.image import ImageEntity
 from homeassistant.const import ATTR_ENTITY_ID, CONF_FILENAME
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.template import Template
-from homeassistant.util import slugify
+from homeassistant.util import dt as dt_util, slugify
 
 from . import HikvisionConfigEntry
 from .const import DOMAIN, ACTION_UPDATE_SNAPSHOT, HIKVISION_EVENT_IMAGE_UPDATED
@@ -40,12 +41,18 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
-    platform = entity_platform.async_get_current_platform()
-    platform.async_register_entity_service(
-        ACTION_UPDATE_SNAPSHOT,
-        {vol.Required(CONF_FILENAME): cv.template},
-        "update_snapshot_filename",
-    )
+    try:
+        from homeassistant.helpers.service import async_register_platform_entity_service
+    except ImportError:
+        async_register_platform_entity_service = None
+
+    if not async_register_platform_entity_service:
+        platform = entity_platform.async_get_current_platform()
+        platform.async_register_entity_service(
+            ACTION_UPDATE_SNAPSHOT,
+            {vol.Required(CONF_FILENAME): cv.template},
+            "update_snapshot_filename",
+        )
 
 
 class SnapshotFile(ImageEntity):
@@ -58,7 +65,7 @@ class SnapshotFile(ImageEntity):
         self,
         hass: HomeAssistant,
         device: HikvisionDevice,
-        camera: Camera,
+        camera: AnalogCamera | IPCamera,
         stream_info: CameraStreamInfo,
     ) -> None:
         """Initialize the snapshot file."""
@@ -66,7 +73,7 @@ class SnapshotFile(ImageEntity):
         ImageEntity.__init__(self, hass)
 
         self._attr_unique_id = slugify(f"{device.device_info.serial_no.lower()}_{stream_info.id}_snapshot")
-        self.entity_id = f"camera.{self.unique_id}"
+        self.entity_id = f"image.{self.unique_id}"
         self._attr_translation_key = "snapshot"
         self._attr_translation_placeholders = {"camera": camera.name}
 
@@ -90,8 +97,8 @@ class SnapshotFile(ImageEntity):
     ) -> None:
         """Update the file_path."""
         self.file_path = filename.async_render(variables={ATTR_ENTITY_ID: self.entity_id})
-        self._attr_image_last_updated = datetime.now()
-        self.schedule_update_ha_state()
+        self._attr_image_last_updated = dt_util.utcnow()
+        self.async_write_ha_state()
 
 
 class EventImage(ImageEntity):
@@ -139,8 +146,8 @@ class EventImage(ImageEntity):
 
         if event.data.get("unique_id") != self.unique_id:
             return
-        self._attr_image_last_updated = datetime.now()
-        self.schedule_update_ha_state()
+        self._attr_image_last_updated = dt_util.utcnow()
+        self.async_write_ha_state()
 
     @property
     def file_path(self) -> Path:
@@ -165,7 +172,7 @@ class EventImage(ImageEntity):
 
         try:
             path = self.file_path
-            self._attr_image_last_updated = datetime.fromtimestamp(path.stat().st_mtime)
+            self._attr_image_last_updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
             return path.read_bytes()
         except FileNotFoundError:
             return None

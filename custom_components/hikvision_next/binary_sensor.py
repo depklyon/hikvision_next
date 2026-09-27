@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import ENTITY_ID_FORMAT, BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -44,7 +44,7 @@ class EventBinarySensor(BinarySensorEntity):
 
     def __init__(self, device: HikvisionDevice, device_id: int, event: EventInfo) -> None:
         """Initialize."""
-        self.entity_id = ENTITY_ID_FORMAT.format(event.unique_id)
+        self.entity_id = f"binary_sensor.{event.unique_id}"
         self._attr_unique_id = self.entity_id
         self._attr_translation_key = event.id
         if event.id == EVENT_IO:

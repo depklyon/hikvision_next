@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 
-from homeassistant.components.switch import ENTITY_ID_FORMAT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
@@ -28,6 +27,7 @@ class EventsCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=device.entry,
             name=DOMAIN,
             update_interval=SCAN_INTERVAL_EVENTS,
         )
@@ -42,7 +42,7 @@ class EventsCoordinator(DataUpdateCoordinator):
                 if event.disabled:
                     continue
                 try:
-                    _id = ENTITY_ID_FORMAT.format(event.unique_id)
+                    _id = f"switch.{event.unique_id}"
                     data[_id] = await self.device.get_event_enabled_state(event)
                 except Exception as ex:  # pylint: disable=broad-except
                     self.device.handle_exception(ex, f"Cannot fetch state for {event.id}")
@@ -52,7 +52,7 @@ class EventsCoordinator(DataUpdateCoordinator):
             if event.disabled:
                 continue
             try:
-                _id = ENTITY_ID_FORMAT.format(event.unique_id)
+                _id = f"switch.{event.unique_id}"
                 data[_id] = await self.device.get_event_enabled_state(event)
             except Exception as ex:  # pylint: disable=broad-except
                 self.device.handle_exception(ex, f"Cannot fetch state for {event.id}")
@@ -60,7 +60,7 @@ class EventsCoordinator(DataUpdateCoordinator):
         # Get output port(s) status
         for i in range(1, self.device.capabilities.output_ports + 1):
             try:
-                _id = ENTITY_ID_FORMAT.format(f"{slugify(self.device.device_info.serial_no.lower())}_{i}_alarm_output")
+                _id = f"switch.{slugify(self.device.device_info.serial_no.lower())}_{i}_alarm_output"
                 data[_id] = await self.device.get_io_port_status("output", i)
             except Exception as ex:  # pylint: disable=broad-except
                 self.device.handle_exception(ex, f"Cannot fetch state for alarm output {i}")
@@ -88,6 +88,7 @@ class SecondaryCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=device.entry,
             name=DOMAIN,
             update_interval=SCAN_INTERVAL_HOLIDAYS,
         )

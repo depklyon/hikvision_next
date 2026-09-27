@@ -9,7 +9,7 @@ from typing import Any
 
 from httpx import HTTPStatusError
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from . import HikvisionConfigEntry
@@ -60,7 +60,6 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Hikvisi
     return await _async_get_diagnostics(hass, entry)
 
 
-@callback
 async def _async_get_diagnostics(
     hass: HomeAssistant,
     entry: HikvisionConfigEntry,
