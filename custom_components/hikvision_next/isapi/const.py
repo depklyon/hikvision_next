@@ -89,7 +89,7 @@ EVENTS_ALTERNATE_ID = {
     "vmd": "motiondetection",
     "thermometry": "motiondetection",
     "shelteralarm": "tamperdetection",
-    "VMDHumanVehicle": "motiondetection",
+    "vmdhumanvehicle": "motiondetection",
 }
 
 MUTEX_ALTERNATE_ID = {"motiondetection": "VMDHumanVehicle"}
