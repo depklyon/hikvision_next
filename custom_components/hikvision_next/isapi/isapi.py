@@ -269,6 +269,11 @@ class ISAPIClient:
                 if not channel_id:
                     channel_id = int(event_trigger.get("dynVideoInputChannelID", 0))
                     is_proxy = channel_id > 0
+                
+                # Some Hikvision smart events (like VMDHumanVehicle) omit the channel ID.
+                # If it's a video event and channel is still 0, default to 1.
+                if not channel_id:
+                    channel_id = 1
 
             url = self.get_event_url(event_id, channel_id, io_port, is_proxy)
 
@@ -285,17 +290,20 @@ class ISAPIClient:
 
         events = []
 
-        # Get events from Event/triggers
-        event_triggers = await self.request(GET, "Event/triggers")
-        event_notification = event_triggers.get("EventNotification")
-        if event_notification:
-            available_events = deep_get(event_notification, "EventTriggerList.EventTrigger", [])
-        else:
-            available_events = deep_get(event_triggers, "EventTriggerList.EventTrigger", [])
+        # Get events from Event/triggers (some devices return 500 here)
+        try:
+            event_triggers = await self.request(GET, "Event/triggers")
+            event_notification = event_triggers.get("EventNotification")
+            if event_notification:
+                available_events = deep_get(event_notification, "EventTriggerList.EventTrigger", [])
+            else:
+                available_events = deep_get(event_triggers, "EventTriggerList.EventTrigger", [])
 
-        for event_trigger in available_events:
-            if event := create_event_info(event_trigger):
-                events.append(event)
+            for event_trigger in available_events:
+                if event := create_event_info(event_trigger):
+                    events.append(event)
+        except httpx.HTTPError as ex:
+            _LOGGER.debug("Event/triggers endpoint failed (%s), falling back to channels/capabilities", ex)
 
         # some devices do not have scenechangedetection in Event/triggers
         if not [e for e in events if e.id == "scenechangedetection"]:
@@ -306,13 +314,16 @@ class ISAPIClient:
                 if event := create_event_info(event_trigger):
                     events.append(event)
 
-        # multichannel camera needs to fetch events for each channel
-        if self.capabilities.is_multi_channel:
+        # some devices fail on Event/triggers (500 error) or are multi-channel.
+        # Fall back to checking capabilities and querying triggers individually.
+        if self.capabilities.is_multi_channel or not events:
             channels_capabilities = await self.request(GET, "Event/channels/capabilities")
             channel_events = deep_get(channels_capabilities, "ChannelEventCapList.ChannelEventCap", [])
+            if isinstance(channel_events, dict):
+                channel_events = [channel_events]
             for event_cap in channel_events:
                 event_types = deep_get(event_cap, "eventType").get("@opt", "").split(",")
-                channel_id = int(event_cap.get("channelID"))
+                channel_id = int(event_cap.get("channelID", 1))
                 for event_type in event_types:
                     event_id = event_type.lower()
                     if event_id in EVENTS_ALTERNATE_ID:
@@ -320,10 +331,20 @@ class ISAPIClient:
                     if event_id not in EVENTS:
                         continue
                     if not [e for e in events if (e.id == event_id and e.channel_id == channel_id)]:
-                        event_trigger = await self.request(GET, f"Event/triggers/{event_id}-{channel_id}")
-                        event_trigger = deep_get(event_trigger, "EventTrigger", {})
-                        if event := create_event_info(event_trigger):
-                            events.append(event)
+                        try:
+                            event_trigger = await self.request(GET, f"Event/triggers/{event_type}-{channel_id}")
+                            event_trigger = deep_get(event_trigger, "EventTrigger", {})
+                            if event := create_event_info(event_trigger):
+                                events.append(event)
+                        except httpx.HTTPError:
+                            _LOGGER.debug("Trigger endpoint missing for %s, creating fallback event", event_type)
+                            fallback_trigger = {
+                                "eventType": event_type,
+                                "videoInputChannelID": str(channel_id),
+                                "EventTriggerNotificationList": {"EventTriggerNotification": [{"notificationMethod": "center"}]}
+                            }
+                            if event := create_event_info(fallback_trigger):
+                                events.append(event)
 
         return events
 
