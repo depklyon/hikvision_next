@@ -27,6 +27,7 @@ from .const import (
     ATTR_LAST_IMAGE_PATH,
     ATTR_LAST_IMAGE_SIZE,
     ATTR_LAST_IMAGE_URL,
+    CONF_IMAGE_RETENTION,
     DOMAIN,
     HIKVISION_EVENT,
     HIKVISION_EVENT_IMAGE_UPDATED,
@@ -244,17 +245,34 @@ class EventNotificationsView(HomeAssistantView):
 
         def write_image() -> StoredEventImage:
             channel_id = alert.channel_id or 0
+            retention_count = int(device.entry.options.get(CONF_IMAGE_RETENTION, 1))
+
+            timestamp_str = dt_util.utcnow().strftime("%Y%m%d_%H%M%S") if retention_count > 1 else ""
+            filename = f"{alert.event_id}_{timestamp_str}.{image.extension}" if timestamp_str else f"{alert.event_id}.{image.extension}"
+
             relative_path = Path(
                 DOMAIN,
                 device.entry.entry_id,
                 f"channel_{channel_id}",
-                f"{alert.event_id}.{image.extension}",
+                filename,
             )
             path = Path(self.hass.config.path("www")) / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = path.with_suffix(f".tmp.{image.extension}")
             temporary_path.write_bytes(image.content)
             temporary_path.replace(path)
+
+            if retention_count > 1:
+                # Cleanup older images
+                pattern = f"{alert.event_id}_*.{image.extension}"
+                existing_files = sorted(path.parent.glob(pattern), key=lambda p: p.stat().st_mtime)
+                while len(existing_files) > retention_count:
+                    oldest_file = existing_files.pop(0)
+                    try:
+                        oldest_file.unlink()
+                    except OSError:
+                        pass
+
             return StoredEventImage(
                 path=str(path),
                 url=f"/local/{relative_path.as_posix()}",
@@ -326,6 +344,20 @@ class EventNotificationsView(HomeAssistantView):
                     attributes["region_id"] = alert.region_id
 
                 self.hass.states.async_set(entity_id, STATE_ON, attributes)
+                
+                # Trigger target-specific sensors
+                if alert.detection_target:
+                    targets = alert.detection_target if isinstance(alert.detection_target, list) else [alert.detection_target]
+                    for t in targets:
+                        target_str = "human" if str(t) == "1" or str(t).lower() == "human" else "vehicle" if str(t) == "2" or str(t).lower() == "vehicle" else str(t).lower()
+                        
+                        target_unique_id = f"{unique_id}_{target_str}"
+                        target_entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, target_unique_id)
+                        if target_entity_id:
+                            target_entity = self.hass.states.get(target_entity_id)
+                            if target_entity:
+                                self.hass.states.async_set(target_entity_id, STATE_ON, dict(target_entity.attributes))
+
                 self.fire_hass_event(device, alert, stored_image)
                 if stored_image:
                     self.fire_image_updated_event(device, alert, stored_image)

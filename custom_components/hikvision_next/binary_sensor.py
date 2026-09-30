@@ -28,12 +28,35 @@ async def async_setup_entry(
     for camera in device.cameras:
         for event in camera.events_info:
             entities.append(EventBinarySensor(device, camera.id, event))
+            if event.id in ("motiondetection", "fielddetection", "linedetection", "regionentrance", "regionexiting"):
+                entities.append(TargetBinarySensor(device, camera.id, event, "human"))
+                entities.append(TargetBinarySensor(device, camera.id, event, "vehicle"))
 
     # General Events
     for event in device.events_info:
         entities.append(EventBinarySensor(device, 0, event))
 
     async_add_entities(entities)
+
+
+class TargetBinarySensor(BinarySensorEntity):
+    """Event detection target sensor."""
+
+    _attr_has_entity_name = True
+    _attr_is_on = False
+
+    def __init__(self, device: HikvisionDevice, device_id: int, event: EventInfo, target: str) -> None:
+        """Initialize."""
+        self.entity_id = f"binary_sensor.{event.unique_id}_{target}"
+        self._attr_unique_id = self.entity_id
+        
+        base_name = EVENTS[event.id].get("label", event.id)
+        target_title = target.capitalize()
+        self._attr_name = f"{base_name} {target_title}"
+        
+        self._attr_device_class = EVENTS[event.id]["device_class"]
+        self._attr_device_info = device.hass_device_info(device_id)
+        self._attr_entity_registry_enabled_default = not event.disabled
 
 
 class EventBinarySensor(BinarySensorEntity):
