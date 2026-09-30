@@ -118,3 +118,37 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
         """Perform reauth upon an authorization error."""
         self._entry = self._get_reauth_entry()
         return await self.async_step_user()
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return HikvisionOptionsFlowHandler(config_entry)
+
+
+from homeassistant.config_entries import OptionsFlow
+
+class HikvisionOptionsFlowHandler(OptionsFlow):
+    """Handle Hikvision options."""
+
+    def __init__(self, config_entry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage the options."""
+        from .const import CONF_IMAGE_RETENTION
+
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_IMAGE_RETENTION,
+                        default=self.config_entry.options.get(CONF_IMAGE_RETENTION, 1),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                }
+            ),
+        )
