@@ -22,6 +22,7 @@ from homeassistant.core import callback
 from . import HikvisionConfigEntry
 from .const import (
     CONF_ALARM_SERVER_HOST,
+    CONF_IMAGE_RETENTION,
     CONF_SET_ALARM_SERVER,
     DOMAIN,
     RTSP_PORT_FORCED,
@@ -125,22 +126,19 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return HikvisionOptionsFlowHandler(config_entry)
+        return HikvisionOptionsFlowHandler()
 
 
 class HikvisionOptionsFlowHandler(OptionsFlow):
     """Handle Hikvision options."""
 
-    def __init__(self, config_entry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""
-        from .const import CONF_IMAGE_RETENTION
 
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
+
+        current_retention = int(self.config_entry.options.get(CONF_IMAGE_RETENTION, 1))
 
         return self.async_show_form(
             step_id="init",
@@ -148,8 +146,8 @@ class HikvisionOptionsFlowHandler(OptionsFlow):
                 {
                     vol.Optional(
                         CONF_IMAGE_RETENTION,
-                        default=self.config_entry.options.get(CONF_IMAGE_RETENTION, 1),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                        default=current_retention,
+                    ): int,
                 }
             ),
         )

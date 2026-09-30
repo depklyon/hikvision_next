@@ -347,16 +347,16 @@ class EventNotificationsView(HomeAssistantView):
                 
                 # Trigger target-specific sensors
                 if alert.detection_target:
-                    targets = alert.detection_target if isinstance(alert.detection_target, list) else [alert.detection_target]
-                    for t in targets:
-                        target_str = "human" if str(t) == "1" or str(t).lower() == "human" else "vehicle" if str(t) == "2" or str(t).lower() == "vehicle" else str(t).lower()
-                        
-                        target_unique_id = f"{unique_id}_{target_str}"
-                        target_entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, target_unique_id)
-                        if target_entity_id:
-                            target_entity = self.hass.states.get(target_entity_id)
-                            if target_entity:
-                                self.hass.states.async_set(target_entity_id, STATE_ON, dict(target_entity.attributes))
+                    target_map = {"1": "human", "2": "vehicle"}
+                    raw = str(alert.detection_target).lower()
+                    target_str = target_map.get(raw, raw)
+
+                    target_unique_id = f"{unique_id}_{target_str}"
+                    target_entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, target_unique_id)
+                    if target_entity_id:
+                        target_entity = self.hass.states.get(target_entity_id)
+                        if target_entity:
+                            self.hass.states.async_set(target_entity_id, STATE_ON, dict(target_entity.attributes))
 
                 self.fire_hass_event(device, alert, stored_image)
                 if stored_image:

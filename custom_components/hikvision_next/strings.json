@@ -26,6 +26,18 @@
       "unknown": "Unexpected error"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "image_retention": "Image retention count"
+        },
+        "data_description": {
+          "image_retention": "Number of event images to keep per event type (1 = overwrite, higher = rolling buffer)"
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "motiondetection": {
