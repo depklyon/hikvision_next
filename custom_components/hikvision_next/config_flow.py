@@ -14,8 +14,10 @@ from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     ConfigFlow,
     ConfigFlowResult,
+    OptionsFlow,
 )
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, CONF_VERIFY_SSL
+from homeassistant.core import callback
 
 from . import HikvisionConfigEntry
 from .const import (
@@ -120,12 +122,11 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
     @staticmethod
+    @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
         return HikvisionOptionsFlowHandler(config_entry)
 
-
-from homeassistant.config_entries import OptionsFlow
 
 class HikvisionOptionsFlowHandler(OptionsFlow):
     """Handle Hikvision options."""
