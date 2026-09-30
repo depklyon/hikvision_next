@@ -8,10 +8,12 @@ The Home Assistant integration for Hikvision NVRs and IP cameras. Receives and s
 
 - Camera entities for main and sub streams
 - Real-time Acusense events notifications through binary sensors and HA events (hikvision_next_event)
+- **NEW**: Separate Target binary sensors for Human/Vehicle detection (on supported Smart events)
 - Switches for Acusense events detection
 - Switches for NVR Outputs and PIR sensor
 - Holiday mode switch (allows to switch continuous recording with appropriate NVR setup)
 - Image entities for the latest snapshots
+- **NEW**: Rolling buffer for event snapshots based on customizable Image Retention config option
 - Tracking HDD and NAS status
 - Tracking Notifications Host settings for diagnostic purposes
 - Remote reboot device
@@ -47,6 +49,12 @@ Creates automation that allows to take snapshots from selected cameras when an e
 Creates an automation that allows to display text overlay on a selected video stream with the state of a selected sensor. Refreshes every 15 minutes.
 
 [<img src="https://my.home-assistant.io/badges/blueprint_import.svg">](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com/depklyon/hikvision_next/blob/main/blueprints/display_sensor_state_on_hikvision_video.yaml)
+
+## Configuration
+
+You can configure options for this integration by navigating to **Settings > Devices & Services**, finding the Hikvision NVR / IP Camera integration, and clicking **Configure**.
+
+*   **Image Retention Count**: Sets the number of event images (snapshots) to keep on disk. Defaults to 1 (overwriting the previous image). If set higher, images are saved with timestamps (e.g. `motiondetection_YYYYMMDD_HHMMSS.jpeg`) and a rolling buffer is maintained.
 
 ## Preview
 
@@ -138,8 +146,10 @@ Download logs from `Settings / System / Logs`
 ### IP Camera
 
 - Annke C800 (I91BM)
+- DS-2CD1323G2-LIU
 - DS-2CD2047G2-LU/SL
 - DS-2CD2047G2H-LIU
+- DS-2CD2083G2-I
 - DS-2CD2087G2-LU
 - DS-2CD2146G2-ISU
 - DS-2CD2155FWD-I
