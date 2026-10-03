@@ -101,6 +101,16 @@ class SnapshotFile(ImageEntity):
         self.async_write_ha_state()
 
 
+PLACEHOLDER_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="100%" height="100%" fill="#1f232a"/>
+  <g fill="#616e7f" transform="translate(288, 120)">
+    <circle cx="32" cy="24" r="14"/>
+    <path d="M52 8h-9.2l-3.2-5.4A4 4 0 0 0 36.2 0H27.8a4 4 0 0 0-3.4 2.6L21.2 8H12A12 12 0 0 0 0 20v28a12 12 0 0 0 12 12h40a12 12 0 0 0 12-12V20a12 12 0 0 0-12-12zm-20 44a18 18 0 1 1 0-36 18 18 0 0 1 0 36z"/>
+  </g>
+  <text x="50%" y="220" text-anchor="middle" fill="#8c9baa" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="500">No image captured yet</text>
+</svg>"""
+
+
 class EventImage(ImageEntity):
     """An entity for displaying the last event image."""
 
@@ -120,13 +130,17 @@ class EventImage(ImageEntity):
         self.device = device
         self.camera = camera
         self.event = event
+        self._current_path: Path | None = None
         self._attr_device_info = device.hass_device_info(camera.id)
         self._attr_unique_id = slugify(f"{device.device_info.serial_no.lower()}_{camera.id}_{event.id}_last_image")
         self.entity_id = f"image.{self.unique_id}"
         self._attr_translation_key = "event_image"
+        
+        from .const import EVENTS as ISAPI_EVENTS
+        event_label = ISAPI_EVENTS.get(event.id, {}).get("label", event.id)
         self._attr_translation_placeholders = {
             "camera": camera.name,
-            "event": event.id,
+            "event": event_label,
         }
         self._attr_entity_registry_enabled_default = not event.disabled
 
@@ -146,6 +160,8 @@ class EventImage(ImageEntity):
 
         if event.data.get("unique_id") != self.unique_id:
             return
+        if path_str := event.data.get("path"):
+            self._current_path = Path(path_str)
         self._attr_image_last_updated = dt_util.utcnow()
         self.async_write_ha_state()
 
@@ -153,7 +169,27 @@ class EventImage(ImageEntity):
     def file_path(self) -> Path:
         """Return latest image path."""
 
-        base_path = Path(
+        if self._current_path and self._current_path.exists():
+            return self._current_path
+
+        # 1. Check media directory first
+        media_base = Path(self.hass.config.path("media", DOMAIN, f"channel_{self.camera.id}"))
+        if media_base.exists():
+            latest_file = media_base / f"{self.event.id}_latest.jpeg"
+            if latest_file.exists():
+                return latest_file
+            # Find any newest matching file
+            matching = sorted(
+                media_base.glob(f"{self.event.id}*.*"),
+                key=lambda p: p.stat().st_mtime if not p.name.endswith(".tmp") else 0,
+                reverse=True,
+            )
+            for f in matching:
+                if not f.name.endswith(".tmp"):
+                    return f
+
+        # 2. Check www fallback directory
+        www_base = Path(
             self.hass.config.path(
                 "www",
                 DOMAIN,
@@ -161,18 +197,37 @@ class EventImage(ImageEntity):
                 f"channel_{self.camera.id}",
             )
         )
-        for extension in ("jpeg", "jpg", "png", "webp", "gif"):
-            path = base_path / f"{self.event.id}.{extension}"
-            if path.exists():
-                return path
-        return base_path / f"{self.event.id}.jpeg"
+        if www_base.exists():
+            latest_file = www_base / f"{self.event.id}_latest.jpeg"
+            if latest_file.exists():
+                return latest_file
+            for extension in ("jpeg", "jpg", "png", "webp", "gif"):
+                path = www_base / f"{self.event.id}.{extension}"
+                if path.exists():
+                    return path
+            matching = sorted(
+                www_base.glob(f"{self.event.id}*.*"),
+                key=lambda p: p.stat().st_mtime if not p.name.endswith(".tmp") else 0,
+                reverse=True,
+            )
+            for f in matching:
+                if not f.name.endswith(".tmp"):
+                    return f
+
+        return media_base / f"{self.event.id}.jpeg"
 
     def image(self) -> bytes | None:
         """Return bytes of image."""
 
         try:
             path = self.file_path
-            self._attr_image_last_updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-            return path.read_bytes()
+            if path.exists():
+                self._attr_content_type = "image/jpeg"
+                self._attr_image_last_updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+                return path.read_bytes()
         except FileNotFoundError:
-            return None
+            pass
+
+        # Return friendly placeholder SVG if no image is available
+        self._attr_content_type = "image/svg+xml"
+        return PLACEHOLDER_SVG

@@ -336,7 +336,7 @@ class ISAPIClient:
                             event_trigger = deep_get(event_trigger, "EventTrigger", {})
                             if event := create_event_info(event_trigger):
                                 events.append(event)
-                        except httpx.HTTPError:
+                        except Exception:
                             _LOGGER.debug("Trigger endpoint missing for %s, creating fallback event", event_type)
                             fallback_trigger = {
                                 "eventType": event_type,
@@ -696,21 +696,63 @@ class ISAPIClient:
         device_serial = deep_get(alert, "Extensions.serialNumber.#text")
         # <EventNotificationAlert version="2.0"
         mac = alert.get("macAddress")
+        event_state = str(alert.get("eventState", "active")).lower()
 
-        detection_target = deep_get(alert, "DetectionRegionList.DetectionRegionEntry.detectionTarget")
-        region_id = int(deep_get(alert, "DetectionRegionList.DetectionRegionEntry.regionID", 0))
+        # Extract detection targets from root <targetType> or <DetectionRegionList>
+        raw_targets = []
+        region_id = 0
+
+        # Check root <targetType> (e.g. AcuSense VMD/motion)
+        if root_target := alert.get("targetType"):
+            raw_targets.append(root_target)
+
+        # Check DetectionRegionList (single entry dict or multiple entry list)
+        region_entries = deep_get(alert, "DetectionRegionList.DetectionRegionEntry", [])
+        if isinstance(region_entries, dict):
+            region_entries = [region_entries]
+        elif not isinstance(region_entries, list):
+            region_entries = []
+
+        for entry in region_entries:
+            if isinstance(entry, dict):
+                if entry_target := entry.get("detectionTarget"):
+                    raw_targets.append(entry_target)
+                if not region_id and (entry_region := entry.get("regionID")):
+                    try:
+                        region_id = int(entry_region)
+                    except (ValueError, TypeError):
+                        pass
+
+        # Normalize target identifiers
+        target_mapping = {
+            "1": "human",
+            "human": "human",
+            "person": "human",
+            "2": "vehicle",
+            "vehicle": "vehicle",
+            "car": "vehicle",
+        }
+        normalized_targets: list[str] = []
+        for t in raw_targets:
+            norm = target_mapping.get(str(t).lower().strip(), str(t).lower().strip())
+            if norm and norm not in normalized_targets:
+                normalized_targets.append(norm)
+
+        detection_target = normalized_targets[0] if normalized_targets else None
 
         if not EVENTS[event_id]:
             raise ValueError(f"Unsupported event {event_id}")
 
         return AlertInfo(
-            channel_id,
-            io_port_id,
-            event_id,
-            device_serial,
-            mac,
-            region_id,
-            detection_target,
+            channel_id=channel_id,
+            io_port_id=io_port_id,
+            event_id=event_id,
+            device_serial_no=device_serial,
+            mac=mac,
+            region_id=region_id,
+            detection_target=detection_target,
+            event_state=event_state,
+            detection_targets=normalized_targets,
         )
 
     async def get_camera_image(

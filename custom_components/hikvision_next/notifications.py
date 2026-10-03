@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from http import HTTPStatus
 import ipaddress
 import logging
@@ -17,20 +17,25 @@ from requests_toolbelt.multipart import MultipartDecoder
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import CONTENT_TYPE_TEXT_PLAIN, STATE_ON, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_registry import async_get
 from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     ALARM_SERVER_PATH,
+    ATTR_DETECTION_TARGETS,
+    ATTR_IMAGE_HISTORY,
     ATTR_LAST_EVENT_RECEIVED_AT,
     ATTR_LAST_IMAGE_CONTENT_TYPE,
     ATTR_LAST_IMAGE_PATH,
     ATTR_LAST_IMAGE_SIZE,
     ATTR_LAST_IMAGE_URL,
     CONF_IMAGE_RETENTION,
+    DEFAULT_IMAGE_RETENTION_DAYS,
     DOMAIN,
     HIKVISION_EVENT,
     HIKVISION_EVENT_IMAGE_UPDATED,
+    HIKVISION_SIGNAL_EVENT,
 )
 from .hikvision_device import HikvisionDevice
 from .isapi import AlertInfo, IPCamera, ISAPIClient
@@ -63,7 +68,12 @@ class EventRequestContent:
     """Parsed event notification request content."""
 
     xml: str
-    image: EventImage | None = None
+    images: list[EventImage] = field(default_factory=list)
+
+    @property
+    def image(self) -> EventImage | None:
+        """Return the primary/latest image for backward compatibility."""
+        return self.images[0] if self.images else None
 
 
 @dataclass
@@ -74,6 +84,8 @@ class StoredEventImage:
     url: str
     content_type: str
     size: int
+    all_paths: list[str] = field(default_factory=list)
+    all_urls: list[str] = field(default_factory=list)
 
 
 class EventNotificationsView(HomeAssistantView):
@@ -99,9 +111,13 @@ class EventNotificationsView(HomeAssistantView):
             device = self.get_isapi_device(request.remote, alert)
             self.device = device
             self.update_alert_channel(alert, device)
-            stored_image = await self.store_event_image(device, alert, event_request.image) if event_request.image else None
+            stored_image = (
+                await self.store_event_images(device, alert, event_request.images)
+                if event_request.images
+                else None
+            )
             self.trigger_sensor(device, alert, stored_image)
-            if not event_request.image:
+            if not event_request.images and alert.event_state == "active":
                 self.schedule_event_snapshot(device, alert)
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.warning("Cannot process incoming event %s", ex)
@@ -164,11 +180,11 @@ class EventNotificationsView(HomeAssistantView):
 
         data = await request.read()
 
-        content_type_header = request.headers.get(CONTENT_TYPE).strip()
+        content_type_header = request.headers.get(CONTENT_TYPE, "").strip()
 
         _LOGGER.debug("request headers: %s", request.headers)
         xml = None
-        image = None
+        images: list[EventImage] = []
         if content_type_header in CONTENT_TYPE_XML:
             xml = data.decode("utf-8")
         else:
@@ -185,15 +201,17 @@ class EventNotificationsView(HomeAssistantView):
                 part_content_type = headers.get(CONTENT_TYPE, "")
                 if part_content_type.lower().startswith(CONTENT_TYPE_IMAGE_PREFIX):
                     _LOGGER.debug("image found")
-                    image = EventImage(
-                        content=part.content,
-                        content_type=part_content_type,
-                        extension=self.image_extension(part_content_type),
+                    images.append(
+                        EventImage(
+                            content=part.content,
+                            content_type=part_content_type,
+                            extension=self.image_extension(part_content_type),
+                        )
                     )
 
         if not xml:
             raise ValueError(f"Unexpected event Content-Type {content_type_header}")
-        return EventRequestContent(xml=xml, image=image)
+        return EventRequestContent(xml=xml, images=images)
 
     def schedule_event_snapshot(self, device: HikvisionDevice, alert: AlertInfo) -> None:
         """Schedule fallback snapshot capture without delaying the event response."""
@@ -207,7 +225,7 @@ class EventNotificationsView(HomeAssistantView):
         if not event_image:
             return
 
-        stored_image = await self.store_event_image(device, alert, event_image)
+        stored_image = await self.store_event_images(device, alert, [event_image])
         self.update_sensor_image(device, alert, stored_image)
 
     async def fetch_event_snapshot(self, device: HikvisionDevice, alert: AlertInfo) -> EventImage | None:
@@ -241,46 +259,107 @@ class EventNotificationsView(HomeAssistantView):
         alert: AlertInfo,
         image: EventImage,
     ) -> StoredEventImage:
-        """Store latest image for event."""
+        """Backward-compatible single image storage."""
+        return await self.store_event_images(device, alert, [image])
 
-        def write_image() -> StoredEventImage:
+    async def store_event_images(
+        self,
+        device: HikvisionDevice,
+        alert: AlertInfo,
+        images: list[EventImage],
+    ) -> StoredEventImage:
+        """Store images for event with retention in days and update latest files."""
+
+        def write_images() -> StoredEventImage:
             channel_id = alert.channel_id or 0
-            retention_count = int(device.entry.options.get(CONF_IMAGE_RETENTION, 1))
-
-            timestamp_str = dt_util.utcnow().strftime("%Y%m%d_%H%M%S") if retention_count > 1 else ""
-            filename = f"{alert.event_id}_{timestamp_str}.{image.extension}" if timestamp_str else f"{alert.event_id}.{image.extension}"
-
-            relative_path = Path(
-                DOMAIN,
-                device.entry.entry_id,
-                f"channel_{channel_id}",
-                filename,
+            retention_days = int(
+                device.entry.options.get(CONF_IMAGE_RETENTION, DEFAULT_IMAGE_RETENTION_DAYS)
             )
-            path = Path(self.hass.config.path("www")) / relative_path
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = path.with_suffix(f".tmp.{image.extension}")
-            temporary_path.write_bytes(image.content)
-            temporary_path.replace(path)
 
-            if retention_count > 1:
-                # Cleanup older images
-                pattern = f"{alert.event_id}_*.{image.extension}"
-                existing_files = sorted(path.parent.glob(pattern), key=lambda p: p.stat().st_mtime)
-                while len(existing_files) > retention_count:
-                    oldest_file = existing_files.pop(0)
+            # Store in media folder
+            media_relative_dir = Path(DOMAIN, f"channel_{channel_id}")
+            media_dir = Path(self.hass.config.path("media")) / media_relative_dir
+            media_dir.mkdir(parents=True, exist_ok=True)
+
+            # Backward-compatible www folder
+            www_relative_dir = Path(DOMAIN, device.entry.entry_id, f"channel_{channel_id}")
+            www_dir = Path(self.hass.config.path("www")) / www_relative_dir
+            www_dir.mkdir(parents=True, exist_ok=True)
+
+            now = dt_util.utcnow()
+            timestamp_str = now.strftime("%Y%m%d_%H%M%S_%f")
+
+            saved_paths: list[str] = []
+            saved_urls: list[str] = []
+            primary_path: str = ""
+            primary_url: str = ""
+            primary_content_type = images[0].content_type
+            primary_size = len(images[0].content)
+
+            for idx, img in enumerate(images):
+                suffix = f"_{idx + 1}" if len(images) > 1 else ""
+                filename = f"{alert.event_id}_{timestamp_str}{suffix}.{img.extension}"
+
+                media_path = media_dir / filename
+                www_path = www_dir / filename
+
+                # Write to media
+                tmp_media = media_path.with_suffix(f".tmp.{img.extension}")
+                tmp_media.write_bytes(img.content)
+                tmp_media.replace(media_path)
+
+                # Write to www for backward compatibility
+                tmp_www = www_path.with_suffix(f".tmp.{img.extension}")
+                tmp_www.write_bytes(img.content)
+                tmp_www.replace(www_path)
+
+                # Update fixed latest files
+                if idx == 0:
+                    latest_media = media_dir / f"{alert.event_id}_latest.{img.extension}"
+                    tmp_latest = latest_media.with_suffix(f".tmp.{img.extension}")
+                    tmp_latest.write_bytes(img.content)
+                    tmp_latest.replace(latest_media)
+
+                    # Update legacy {event}.jpeg in www
+                    legacy_www = www_dir / f"{alert.event_id}.{img.extension}"
+                    tmp_legacy = legacy_www.with_suffix(f".tmp.{img.extension}")
+                    tmp_legacy.write_bytes(img.content)
+                    tmp_legacy.replace(legacy_www)
+
+                    primary_path = str(media_path)
+                    primary_url = f"/local/{www_relative_dir.as_posix()}/{alert.event_id}.{img.extension}"
+
+                saved_paths.append(str(media_path))
+                saved_urls.append(f"/local/{www_relative_dir.as_posix()}/{filename}")
+
+            # Cleanup older images based on retention_days
+            cutoff_timestamp = (
+                (now - timedelta(days=retention_days)).timestamp() if retention_days > 0 else now.timestamp()
+            )
+
+            for target_dir in (media_dir, www_dir):
+                pattern = f"{alert.event_id}_*.*"
+                for p in target_dir.glob(pattern):
+                    if p.name.endswith(".tmp") or "_latest." in p.name:
+                        continue
                     try:
-                        oldest_file.unlink()
+                        if retention_days == 0 or p.stat().st_mtime < cutoff_timestamp:
+                            # Keep only the ones just saved if retention is 0
+                            if str(p) not in saved_paths and str(p) not in [str(www_dir / Path(sp).name) for sp in saved_paths]:
+                                p.unlink(missing_ok=True)
                     except OSError:
                         pass
 
             return StoredEventImage(
-                path=str(path),
-                url=f"/local/{relative_path.as_posix()}",
-                content_type=image.content_type,
-                size=len(image.content),
+                path=primary_path,
+                url=primary_url,
+                content_type=primary_content_type,
+                size=primary_size,
+                all_paths=saved_paths,
+                all_urls=saved_urls,
             )
 
-        return await self.hass.async_add_executor_job(write_image)
+        return await self.hass.async_add_executor_job(write_images)
 
     @staticmethod
     def image_extension(content_type: str) -> str:
@@ -297,9 +376,6 @@ class EventNotificationsView(HomeAssistantView):
 
         device = device or self.device
         if alert.channel_id > 32:
-            # channel id above 32 is an IP camera
-            # On DVRs that support analog cameras 33 may not be
-            # camera 1 but camera 5 for example
             try:
                 alert.channel_id = [
                     camera.id
@@ -320,49 +396,56 @@ class EventNotificationsView(HomeAssistantView):
         _LOGGER.debug("Alert: %s", alert)
 
         serial_no = device.device_info.serial_no.lower()
-
         device_id_param = f"_{alert.channel_id}" if alert.channel_id != 0 and alert.event_id != EVENT_IO else ""
         io_port_id_param = f"_{alert.io_port_id}" if alert.io_port_id != 0 else ""
         unique_id = f"binary_sensor.{slugify(serial_no)}{device_id_param}{io_port_id_param}_{alert.event_id}"
 
         _LOGGER.debug("UNIQUE_ID: %s", unique_id)
 
-        entity_registry = async_get(self.hass)
-        entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, unique_id)
-        if entity_id:
-            entity = self.hass.states.get(entity_id)
-            if entity:
-                attributes = dict(entity.attributes)
-                attributes[ATTR_LAST_EVENT_RECEIVED_AT] = dt_util.utcnow().isoformat()
-                if stored_image:
-                    attributes[ATTR_LAST_IMAGE_PATH] = stored_image.path
-                    attributes[ATTR_LAST_IMAGE_URL] = stored_image.url
-                    attributes[ATTR_LAST_IMAGE_CONTENT_TYPE] = stored_image.content_type
-                    attributes[ATTR_LAST_IMAGE_SIZE] = stored_image.size
-                if alert.detection_target:
-                    attributes["detection_target"] = alert.detection_target
-                    attributes["region_id"] = alert.region_id
+        is_active = alert.event_state != "inactive"
 
-                self.hass.states.async_set(entity_id, STATE_ON, attributes)
-                
-                # Trigger target-specific sensors
-                if alert.detection_target:
-                    target_map = {"1": "human", "2": "vehicle"}
-                    raw = str(alert.detection_target).lower()
-                    target_str = target_map.get(raw, raw)
+        attributes = {
+            ATTR_LAST_EVENT_RECEIVED_AT: dt_util.utcnow().isoformat(),
+        }
+        if stored_image:
+            attributes[ATTR_LAST_IMAGE_PATH] = stored_image.path
+            attributes[ATTR_LAST_IMAGE_URL] = stored_image.url
+            attributes[ATTR_LAST_IMAGE_CONTENT_TYPE] = stored_image.content_type
+            attributes[ATTR_LAST_IMAGE_SIZE] = stored_image.size
+            attributes[ATTR_IMAGE_HISTORY] = stored_image.all_urls
 
-                    target_unique_id = f"{unique_id}_{target_str}"
-                    target_entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, target_unique_id)
-                    if target_entity_id:
-                        target_entity = self.hass.states.get(target_entity_id)
-                        if target_entity:
-                            self.hass.states.async_set(target_entity_id, STATE_ON, dict(target_entity.attributes))
+        if alert.detection_targets:
+            attributes[ATTR_DETECTION_TARGETS] = alert.detection_targets
+        if alert.detection_target:
+            attributes["detection_target"] = alert.detection_target
+            attributes["region_id"] = alert.region_id
 
-                self.fire_hass_event(device, alert, stored_image)
-                if stored_image:
-                    self.fire_image_updated_event(device, alert, stored_image)
-            return
-        raise ValueError(f"Entity not found {entity_id}")
+        # Dispatch state signal to primary sensor entity
+        async_dispatcher_send(
+            self.hass,
+            f"{HIKVISION_SIGNAL_EVENT}_{unique_id}",
+            is_active,
+            attributes,
+        )
+
+        # Trigger target-specific sensors (human / vehicle)
+        for target in ("human", "vehicle"):
+            target_unique_id = f"{unique_id}_{target}"
+            target_active = is_active and (
+                target in alert.detection_targets
+                or (alert.detection_target and target == alert.detection_target)
+            )
+            async_dispatcher_send(
+                self.hass,
+                f"{HIKVISION_SIGNAL_EVENT}_{target_unique_id}",
+                target_active,
+                attributes,
+            )
+
+        # Fire Home Assistant bus event
+        self.fire_hass_event(device, alert, stored_image)
+        if stored_image:
+            self.fire_image_updated_event(device, alert, stored_image)
 
     def update_sensor_image(
         self,
@@ -377,17 +460,20 @@ class EventNotificationsView(HomeAssistantView):
         io_port_id_param = f"_{alert.io_port_id}" if alert.io_port_id != 0 else ""
         unique_id = f"binary_sensor.{slugify(serial_no)}{device_id_param}{io_port_id_param}_{alert.event_id}"
 
-        entity_registry = async_get(self.hass)
-        entity_id = entity_registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, unique_id)
-        if not entity_id or not (entity := self.hass.states.get(entity_id)):
-            return
+        attributes = {
+            ATTR_LAST_IMAGE_PATH: stored_image.path,
+            ATTR_LAST_IMAGE_URL: stored_image.url,
+            ATTR_LAST_IMAGE_CONTENT_TYPE: stored_image.content_type,
+            ATTR_LAST_IMAGE_SIZE: stored_image.size,
+            ATTR_IMAGE_HISTORY: stored_image.all_urls,
+        }
 
-        attributes = dict(entity.attributes)
-        attributes[ATTR_LAST_IMAGE_PATH] = stored_image.path
-        attributes[ATTR_LAST_IMAGE_URL] = stored_image.url
-        attributes[ATTR_LAST_IMAGE_CONTENT_TYPE] = stored_image.content_type
-        attributes[ATTR_LAST_IMAGE_SIZE] = stored_image.size
-        self.hass.states.async_set(entity_id, entity.state, attributes)
+        async_dispatcher_send(
+            self.hass,
+            f"{HIKVISION_SIGNAL_EVENT}_{unique_id}",
+            True,
+            attributes,
+        )
         self.fire_image_updated_event(device, alert, stored_image)
 
     def fire_hass_event(
@@ -406,13 +492,17 @@ class EventNotificationsView(HomeAssistantView):
             "io_port_id": alert.io_port_id,
             "camera_name": camera_name,
             "event_id": alert.event_id,
+            "event_state": alert.event_state,
         }
+        if alert.detection_targets:
+            message[ATTR_DETECTION_TARGETS] = alert.detection_targets
         if alert.detection_target:
             message["detection_target"] = alert.detection_target
             message["region_id"] = alert.region_id
         if stored_image:
             message["last_image_path"] = stored_image.path
             message["last_image_url"] = stored_image.url
+            message["image_history"] = stored_image.all_urls
 
         self.hass.bus.async_fire(
             HIKVISION_EVENT,

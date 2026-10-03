@@ -12,6 +12,8 @@ RTSP_PORT_FORCED: Final = "rtsp_port_forced"
 CONF_SET_ALARM_SERVER: Final = "set_alarm_server"
 CONF_ALARM_SERVER_HOST: Final = "alarm_server"
 CONF_IMAGE_RETENTION: Final = "image_retention"
+DEFAULT_IMAGE_RETENTION_DAYS: Final = 7
+DEFAULT_SENSOR_RESET_SECONDS: Final = 5
 ALARM_SERVER_PATH = "/api/hikvision"
 
 EVENTS_COORDINATOR: Final = "events"
@@ -25,12 +27,15 @@ ACTION_UPDATE_SNAPSHOT = "update_snapshot"
 
 HIKVISION_EVENT = f"{DOMAIN}_event"
 HIKVISION_EVENT_IMAGE_UPDATED = f"{DOMAIN}_event_image_updated"
+HIKVISION_SIGNAL_EVENT = f"{DOMAIN}_signal_event"
 
 ATTR_LAST_EVENT_RECEIVED_AT = "last_event_received_at"
 ATTR_LAST_IMAGE_CONTENT_TYPE = "last_image_content_type"
 ATTR_LAST_IMAGE_PATH = "last_image_path"
 ATTR_LAST_IMAGE_SIZE = "last_image_size"
 ATTR_LAST_IMAGE_URL = "last_image_url"
+ATTR_DETECTION_TARGETS = "detection_targets"
+ATTR_IMAGE_HISTORY = "image_history"
 
 EVENTS = {
     "motiondetection": {

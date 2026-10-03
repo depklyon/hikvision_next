@@ -24,6 +24,7 @@ from .const import (
     CONF_ALARM_SERVER_HOST,
     CONF_IMAGE_RETENTION,
     CONF_SET_ALARM_SERVER,
+    DEFAULT_IMAGE_RETENTION_DAYS,
     DOMAIN,
     RTSP_PORT_FORCED,
 )
@@ -138,7 +139,9 @@ class HikvisionOptionsFlowHandler(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_retention = int(self.config_entry.options.get(CONF_IMAGE_RETENTION, 1))
+        current_retention = int(
+            self.config_entry.options.get(CONF_IMAGE_RETENTION, DEFAULT_IMAGE_RETENTION_DAYS)
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -147,7 +150,7 @@ class HikvisionOptionsFlowHandler(OptionsFlow):
                     vol.Optional(
                         CONF_IMAGE_RETENTION,
                         default=current_retention,
-                    ): int,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=365)),
                 }
             ),
         )

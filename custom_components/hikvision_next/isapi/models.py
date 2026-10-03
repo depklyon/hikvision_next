@@ -23,6 +23,8 @@ class AlertInfo:
     mac: str = ""
     region_id: int = 0
     detection_target: str = field(default=None)
+    event_state: str = "active"
+    detection_targets: list[str] = field(default_factory=list)
 
 
 @dataclass

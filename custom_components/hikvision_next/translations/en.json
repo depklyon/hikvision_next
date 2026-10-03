@@ -30,12 +30,27 @@
     "step": {
       "init": {
         "data": {
-          "image_retention": "Image retention count"
+          "image_retention": "Image retention (days)"
         },
         "data_description": {
-          "image_retention": "Number of event images to keep per event type (1 = overwrite, higher = rolling buffer)"
+          "image_retention": "Number of days to keep event images in the media folder (0 = keep only latest/overwrite, 7 = default)"
         }
       }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "motion": "Motion detected",
+      "human": "Human detected (Motion)",
+      "vehicle": "Vehicle detected (Motion)",
+      "intrusion": "Intrusion detected",
+      "intrusion_human": "Human detected (Intrusion)",
+      "intrusion_vehicle": "Vehicle detected (Intrusion)",
+      "line_crossing": "Line crossing detected",
+      "line_crossing_human": "Human detected (Line crossing)",
+      "line_crossing_vehicle": "Vehicle detected (Line crossing)",
+      "tamper": "Video tampering detected",
+      "scene_change": "Scene change detected"
     }
   },
   "entity": {
@@ -142,7 +157,7 @@
         "name": "{camera} Snapshot"
       },
       "event_image": {
-        "name": "{camera} {event} Last Image"
+        "name": "{event} Last Image"
       }
     }
   },
