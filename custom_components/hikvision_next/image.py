@@ -18,6 +18,7 @@ from homeassistant.util import dt as dt_util, slugify
 
 from . import HikvisionConfigEntry
 from .const import DOMAIN, ACTION_UPDATE_SNAPSHOT, HIKVISION_EVENT_IMAGE_UPDATED
+from .helpers import get_camera_media_dir, get_media_dir
 from .hikvision_device import HikvisionDevice
 from .isapi import AnalogCamera, CameraStreamInfo, EventInfo, IPCamera
 
@@ -38,6 +39,9 @@ async def async_setup_entry(
                 entities.append(SnapshotFile(hass, device, camera, stream))
         for event in camera.events_info:
             entities.append(EventImage(hass, device, camera, event))
+            if event.id in ("motiondetection", "fielddetection", "linedetection", "regionentrance", "regionexiting"):
+                entities.append(EventImage(hass, device, camera, event, target="human"))
+                entities.append(EventImage(hass, device, camera, event, target="vehicle"))
 
     async_add_entities(entities)
 
@@ -122,6 +126,7 @@ class EventImage(ImageEntity):
         device: HikvisionDevice,
         camera: AnalogCamera | IPCamera,
         event: EventInfo,
+        target: str | None = None,
     ) -> None:
         """Initialize the event image."""
 
@@ -130,14 +135,18 @@ class EventImage(ImageEntity):
         self.device = device
         self.camera = camera
         self.event = event
+        self.target = target
         self._current_path: Path | None = None
         self._attr_device_info = device.hass_device_info(camera.id)
-        self._attr_unique_id = slugify(f"{device.device_info.serial_no.lower()}_{camera.id}_{event.id}_last_image")
+        target_param = f"_{target}" if target else ""
+        self._attr_unique_id = slugify(f"{device.device_info.serial_no.lower()}_{camera.id}_{event.id}{target_param}_last_image")
         self.entity_id = f"image.{self.unique_id}"
         self._attr_translation_key = "event_image"
         
         from .const import EVENTS as ISAPI_EVENTS
         event_label = ISAPI_EVENTS.get(event.id, {}).get("label", event.id)
+        if target:
+            event_label = f"{event_label} {target.capitalize()}"
         self._attr_translation_placeholders = {
             "camera": camera.name,
             "event": event_label,
@@ -172,20 +181,36 @@ class EventImage(ImageEntity):
         if self._current_path and self._current_path.exists():
             return self._current_path
 
-        # 1. Check media directory first
-        media_base = Path(self.hass.config.path("media", DOMAIN, f"channel_{self.camera.id}"))
-        if media_base.exists():
-            latest_file = media_base / f"{self.event.id}_latest.jpeg"
+        target_prefix = f"{self.event.id}_{self.target}" if self.target else self.event.id
+
+        # 1. Check isolated camera media directory first (preferred)
+        camera_media_dir = get_camera_media_dir(self.hass, self.device, self.camera.id)
+        if camera_media_dir.exists():
+            latest_file = camera_media_dir / f"{target_prefix}_latest.jpeg"
             if latest_file.exists():
                 return latest_file
-            # Find any newest matching file
             matching = sorted(
-                media_base.glob(f"{self.event.id}*.*"),
+                camera_media_dir.glob(f"{target_prefix}*.*"),
                 key=lambda p: p.stat().st_mtime if not p.name.endswith(".tmp") else 0,
                 reverse=True,
             )
             for f in matching:
-                if not f.name.endswith(".tmp"):
+                if not f.name.endswith(".tmp") and not f.name.endswith(".tmp.jpeg"):
+                    return f
+
+        # 2. Check root media directory fallback (legacy flat path)
+        media_root = get_media_dir(self.hass) / DOMAIN / f"channel_{self.camera.id}"
+        if media_root.exists():
+            latest_file = media_root / f"{target_prefix}_latest.jpeg"
+            if latest_file.exists():
+                return latest_file
+            matching = sorted(
+                media_root.glob(f"{target_prefix}*.*"),
+                key=lambda p: p.stat().st_mtime if not p.name.endswith(".tmp") else 0,
+                reverse=True,
+            )
+            for f in matching:
+                if not f.name.endswith(".tmp") and not f.name.endswith(".tmp.jpeg"):
                     return f
 
         # 2. Check www fallback directory
@@ -198,23 +223,23 @@ class EventImage(ImageEntity):
             )
         )
         if www_base.exists():
-            latest_file = www_base / f"{self.event.id}_latest.jpeg"
+            latest_file = www_base / f"{target_prefix}_latest.jpeg"
             if latest_file.exists():
                 return latest_file
             for extension in ("jpeg", "jpg", "png", "webp", "gif"):
-                path = www_base / f"{self.event.id}.{extension}"
+                path = www_base / f"{target_prefix}.{extension}"
                 if path.exists():
                     return path
             matching = sorted(
-                www_base.glob(f"{self.event.id}*.*"),
+                www_base.glob(f"{target_prefix}*.*"),
                 key=lambda p: p.stat().st_mtime if not p.name.endswith(".tmp") else 0,
                 reverse=True,
             )
             for f in matching:
-                if not f.name.endswith(".tmp"):
+                if not f.name.endswith(".tmp") and not f.name.endswith(".tmp.jpeg"):
                     return f
 
-        return media_base / f"{self.event.id}.jpeg"
+        return camera_media_dir / f"{target_prefix}.jpeg"
 
     def image(self) -> bytes | None:
         """Return bytes of image."""

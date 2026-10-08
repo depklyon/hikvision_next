@@ -7,14 +7,30 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from .isapi.const import EVENTS as ISAPI_EVENTS
 
 DOMAIN: Final = "hikvision_next"
+VERSION: Final = "1.5.0"
 
 RTSP_PORT_FORCED: Final = "rtsp_port_forced"
 CONF_SET_ALARM_SERVER: Final = "set_alarm_server"
 CONF_ALARM_SERVER_HOST: Final = "alarm_server"
 CONF_IMAGE_RETENTION: Final = "image_retention"
 DEFAULT_IMAGE_RETENTION_DAYS: Final = 7
+CONF_IMAGE_CAPTURE_MOVEMENT: Final = "image_capture_movement"
+DEFAULT_IMAGE_CAPTURE_MOVEMENT: Final = False
+CONF_SHOW_SIDEBAR_PANEL: Final = "show_sidebar_panel"
+DEFAULT_SHOW_SIDEBAR_PANEL: Final = True
+GLOBAL_SETTINGS_UNIQUE_ID: Final = "hikvision_global_settings"
+CONF_IS_GLOBAL_SETTINGS: Final = "is_global_settings"
+GLOBAL_SETTINGS_TITLE: Final = "⚙️ Global Settings"
 DEFAULT_SENSOR_RESET_SECONDS: Final = 5
 ALARM_SERVER_PATH = "/api/hikvision"
+
+TARGET_HUMAN: Final = "human"
+TARGET_VEHICLE: Final = "vehicle"
+TARGET_MOVEMENT: Final = "movement"
+ATTR_TARGET: Final = "target"
+
+PANEL_URL_PATH: Final = "hikvision-events"
+FRONTEND_STATIC_PATH: Final = "/hikvision_next_frontend"
 
 EVENTS_COORDINATOR: Final = "events"
 SECONDARY_COORDINATOR: Final = "secondary"

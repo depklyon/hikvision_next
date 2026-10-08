@@ -22,12 +22,20 @@ from homeassistant.core import callback
 from . import HikvisionConfigEntry
 from .const import (
     CONF_ALARM_SERVER_HOST,
+    CONF_IMAGE_CAPTURE_MOVEMENT,
     CONF_IMAGE_RETENTION,
+    CONF_IS_GLOBAL_SETTINGS,
     CONF_SET_ALARM_SERVER,
+    CONF_SHOW_SIDEBAR_PANEL,
+    DEFAULT_IMAGE_CAPTURE_MOVEMENT,
     DEFAULT_IMAGE_RETENTION_DAYS,
+    DEFAULT_SHOW_SIDEBAR_PANEL,
     DOMAIN,
+    GLOBAL_SETTINGS_TITLE,
+    GLOBAL_SETTINGS_UNIQUE_ID,
     RTSP_PORT_FORCED,
 )
+from .helpers import is_global_settings_entry
 from .hikvision_device import HikvisionDevice
 from .isapi import ISAPIForbiddenError, ISAPIUnauthorizedError
 
@@ -123,6 +131,23 @@ class HikvisionConfigFlow(ConfigFlow, domain=DOMAIN):
         self._entry = self._get_reauth_entry()
         return await self.async_step_user()
 
+    async def async_step_system(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle automatic creation of global settings entry."""
+        await self.async_set_unique_id(GLOBAL_SETTINGS_UNIQUE_ID)
+        self._abort_if_unique_id_configured()
+
+        initial_show_sidebar = DEFAULT_SHOW_SIDEBAR_PANEL
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if not is_global_settings_entry(entry) and CONF_SHOW_SIDEBAR_PANEL in entry.options:
+                initial_show_sidebar = entry.options[CONF_SHOW_SIDEBAR_PANEL]
+                break
+
+        return self.async_create_entry(
+            title=GLOBAL_SETTINGS_TITLE,
+            data={CONF_IS_GLOBAL_SETTINGS: True},
+            options={CONF_SHOW_SIDEBAR_PANEL: initial_show_sidebar},
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
@@ -135,12 +160,38 @@ class HikvisionOptionsFlowHandler(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""
+        if is_global_settings_entry(self.config_entry):
+            if user_input is not None:
+                return self.async_create_entry(title="", data=user_input)
+
+            current_show_sidebar = bool(
+                self.config_entry.options.get(
+                    CONF_SHOW_SIDEBAR_PANEL, DEFAULT_SHOW_SIDEBAR_PANEL
+                )
+            )
+
+            return self.async_show_form(
+                step_id="init",
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_SHOW_SIDEBAR_PANEL,
+                            default=current_show_sidebar,
+                        ): bool,
+                    }
+                ),
+            )
 
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
         current_retention = int(
             self.config_entry.options.get(CONF_IMAGE_RETENTION, DEFAULT_IMAGE_RETENTION_DAYS)
+        )
+        current_capture_movement = bool(
+            self.config_entry.options.get(
+                CONF_IMAGE_CAPTURE_MOVEMENT, DEFAULT_IMAGE_CAPTURE_MOVEMENT
+            )
         )
 
         return self.async_show_form(
@@ -151,6 +202,14 @@ class HikvisionOptionsFlowHandler(OptionsFlow):
                         CONF_IMAGE_RETENTION,
                         default=current_retention,
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=365)),
+                    vol.Optional(
+                        CONF_IMAGE_CAPTURE_MOVEMENT,
+                        default=current_capture_movement,
+                    ): bool,
                 }
             ),
         )
+
+    async def async_step_global(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage global integration options (alias)."""
+        return await self.async_step_init(user_input)

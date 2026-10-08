@@ -30,13 +30,18 @@ from .const import (
     ATTR_LAST_IMAGE_PATH,
     ATTR_LAST_IMAGE_SIZE,
     ATTR_LAST_IMAGE_URL,
+    ATTR_TARGET,
+    CONF_IMAGE_CAPTURE_MOVEMENT,
     CONF_IMAGE_RETENTION,
+    DEFAULT_IMAGE_CAPTURE_MOVEMENT,
     DEFAULT_IMAGE_RETENTION_DAYS,
     DOMAIN,
     HIKVISION_EVENT,
     HIKVISION_EVENT_IMAGE_UPDATED,
     HIKVISION_SIGNAL_EVENT,
+    TARGET_MOVEMENT,
 )
+from .helpers import get_camera_media_dir, is_global_settings_entry
 from .hikvision_device import HikvisionDevice
 from .isapi import AlertInfo, IPCamera, ISAPIClient
 from .isapi.const import EVENT_IO
@@ -111,13 +116,14 @@ class EventNotificationsView(HomeAssistantView):
             device = self.get_isapi_device(request.remote, alert)
             self.device = device
             self.update_alert_channel(alert, device)
+            should_capture = self.should_capture_images(device, alert)
             stored_image = (
                 await self.store_event_images(device, alert, event_request.images)
-                if event_request.images
+                if event_request.images and should_capture
                 else None
             )
             self.trigger_sensor(device, alert, stored_image)
-            if not event_request.images and alert.event_state == "active":
+            if not event_request.images and alert.event_state == "active" and should_capture:
                 self.schedule_event_snapshot(device, alert)
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.warning("Cannot process incoming event %s", ex)
@@ -125,9 +131,30 @@ class EventNotificationsView(HomeAssistantView):
         response = web.Response(status=HTTPStatus.OK, content_type=CONTENT_TYPE_TEXT_PLAIN)
         return response
 
+    def should_capture_images(self, device: HikvisionDevice, alert: AlertInfo) -> bool:
+        """Check if images should be captured/stored for this event."""
+        if alert.event_id == "motiondetection":
+            is_targeted = bool(alert.detection_targets or alert.detection_target)
+            if not is_targeted:
+                capture_movement = (
+                    device.entry.options.get(
+                        CONF_IMAGE_CAPTURE_MOVEMENT, DEFAULT_IMAGE_CAPTURE_MOVEMENT
+                    )
+                    if device.entry
+                    else DEFAULT_IMAGE_CAPTURE_MOVEMENT
+                )
+                return bool(capture_movement)
+        return True
+
     def get_isapi_device(self, device_ip, alert: AlertInfo) -> HikvisionDevice:
         """Get integration instance for device sending alert."""
-        integration_entries = self.hass.config_entries.async_entries(DOMAIN)
+        integration_entries = [
+            item
+            for item in self.hass.config_entries.async_entries(DOMAIN)
+            if not is_global_settings_entry(item)
+            and not item.disabled_by
+            and getattr(item, "runtime_data", None) is not None
+        ]
         instance_identifiers = []
         entry = None
         if len(integration_entries) == 1:
@@ -135,9 +162,6 @@ class EventNotificationsView(HomeAssistantView):
         else:
             # Search device by mac_address
             for item in integration_entries:
-                if item.disabled_by:
-                    continue
-
                 item_mac_address = item.runtime_data.device_info.mac_address
                 instance_identifiers.append(item_mac_address)
 
@@ -148,9 +172,6 @@ class EventNotificationsView(HomeAssistantView):
             # Search device by ip_address
             if not entry:
                 for item in integration_entries:
-                    if item.disabled_by:
-                        continue
-
                     url = item.runtime_data.host
                     instance_identifiers.append(url)
 
@@ -276,9 +297,8 @@ class EventNotificationsView(HomeAssistantView):
                 device.entry.options.get(CONF_IMAGE_RETENTION, DEFAULT_IMAGE_RETENTION_DAYS)
             )
 
-            # Store in media folder
-            media_relative_dir = Path(DOMAIN, f"channel_{channel_id}")
-            media_dir = Path(self.hass.config.path("media")) / media_relative_dir
+            # Store in isolated camera media folder
+            media_dir = get_camera_media_dir(self.hass, device, channel_id)
             media_dir.mkdir(parents=True, exist_ok=True)
 
             # Backward-compatible www folder
@@ -288,6 +308,8 @@ class EventNotificationsView(HomeAssistantView):
 
             now = dt_util.utcnow()
             timestamp_str = now.strftime("%Y%m%d_%H%M%S_%f")
+            target_label = alert.detection_target or (alert.detection_targets[0] if alert.detection_targets else None)
+            target_suffix = f"_{target_label}" if target_label else ""
 
             saved_paths: list[str] = []
             saved_urls: list[str] = []
@@ -298,7 +320,7 @@ class EventNotificationsView(HomeAssistantView):
 
             for idx, img in enumerate(images):
                 suffix = f"_{idx + 1}" if len(images) > 1 else ""
-                filename = f"{alert.event_id}_{timestamp_str}{suffix}.{img.extension}"
+                filename = f"{alert.event_id}{target_suffix}_{timestamp_str}{suffix}.{img.extension}"
 
                 media_path = media_dir / filename
                 www_path = www_dir / filename
@@ -320,11 +342,23 @@ class EventNotificationsView(HomeAssistantView):
                     tmp_latest.write_bytes(img.content)
                     tmp_latest.replace(latest_media)
 
+                    if target_label:
+                        target_latest_media = media_dir / f"{alert.event_id}_{target_label}_latest.{img.extension}"
+                        tmp_target = target_latest_media.with_suffix(f".tmp.{img.extension}")
+                        tmp_target.write_bytes(img.content)
+                        tmp_target.replace(target_latest_media)
+
                     # Update legacy {event}.jpeg in www
                     legacy_www = www_dir / f"{alert.event_id}.{img.extension}"
                     tmp_legacy = legacy_www.with_suffix(f".tmp.{img.extension}")
                     tmp_legacy.write_bytes(img.content)
                     tmp_legacy.replace(legacy_www)
+
+                    if target_label:
+                        legacy_target_www = www_dir / f"{alert.event_id}_{target_label}.{img.extension}"
+                        tmp_legacy_target = legacy_target_www.with_suffix(f".tmp.{img.extension}")
+                        tmp_legacy_target.write_bytes(img.content)
+                        tmp_legacy_target.replace(legacy_target_www)
 
                     primary_path = str(media_path)
                     primary_url = f"/local/{www_relative_dir.as_posix()}/{alert.event_id}.{img.extension}"
@@ -428,13 +462,25 @@ class EventNotificationsView(HomeAssistantView):
             attributes,
         )
 
-        # Trigger target-specific sensors (human / vehicle)
-        for target in ("human", "vehicle"):
+        # Trigger target-specific sensors (human / vehicle / movement)
+        is_targeted = bool(alert.detection_targets or alert.detection_target)
+        target_name = (
+            alert.detection_target
+            or (alert.detection_targets[0] if alert.detection_targets else None)
+            or (TARGET_MOVEMENT if not is_targeted else None)
+        )
+        if target_name:
+            attributes[ATTR_TARGET] = target_name
+
+        for target in ("human", "vehicle", "movement"):
             target_unique_id = f"{unique_id}_{target}"
-            target_active = is_active and (
-                target in alert.detection_targets
-                or (alert.detection_target and target == alert.detection_target)
-            )
+            if target == "movement":
+                target_active = is_active and not is_targeted
+            else:
+                target_active = is_active and (
+                    target in alert.detection_targets
+                    or (alert.detection_target and target == alert.detection_target)
+                )
             async_dispatcher_send(
                 self.hass,
                 f"{HIKVISION_SIGNAL_EVENT}_{target_unique_id}",
@@ -527,9 +573,23 @@ class EventNotificationsView(HomeAssistantView):
                 "size": stored_image.size,
             },
         )
+        for target in alert.detection_targets or ([alert.detection_target] if alert.detection_target else []):
+            self.hass.bus.async_fire(
+                HIKVISION_EVENT_IMAGE_UPDATED,
+                {
+                    "unique_id": self.event_image_unique_id(device, alert, target),
+                    "path": stored_image.path,
+                    "url": stored_image.url,
+                    "content_type": stored_image.content_type,
+                    "size": stored_image.size,
+                },
+            )
 
-    def event_image_unique_id(self, device: HikvisionDevice, alert: AlertInfo) -> str:
+    def event_image_unique_id(
+        self, device: HikvisionDevice, alert: AlertInfo, target: str | None = None
+    ) -> str:
         """Return unique ID for the event image entity."""
 
         serial_no = device.device_info.serial_no.lower()
-        return slugify(f"{serial_no}_{alert.channel_id}_{alert.event_id}_last_image")
+        target_param = f"_{target}" if target else ""
+        return slugify(f"{serial_no}_{alert.channel_id}_{alert.event_id}{target_param}_last_image")

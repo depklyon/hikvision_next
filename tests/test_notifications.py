@@ -343,3 +343,56 @@ async def test_nvr_and_cam_notification_alert(
     assert sensor_cam_2.state == STATE_OFF
     assert sensor_cam_3.state == STATE_ON
     assert sensor_nvr_1.state == STATE_ON
+
+
+@pytest.mark.parametrize("init_integration", ["DS-2TD1228-2-QA"], indirect=True)
+async def test_untargeted_motion_skips_image_by_default(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test untargeted motion triggers sensor but skips image saving by default."""
+
+    entity_id = "binary_sensor.ds_2td1228_2_qa_xxxxxxxxxxxxxxxxxx_2_motiondetection"
+    movement_entity_id = f"{entity_id}_movement"
+    image = b"untargeted motion image"
+
+    view = EventNotificationsView(hass)
+    mock_request = mock_multipart_event_notification("ipc_thermometry_motiondetection", image)
+    response = await view.post(mock_request)
+
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+    # By default, untargeted motion images are not saved to prevent flooding
+    assert ATTR_LAST_IMAGE_PATH not in sensor.attributes
+
+    # Check dedicated movement sensor triggered
+    if movement_sensor := hass.states.get(movement_entity_id):
+        assert movement_sensor.state == STATE_ON
+
+
+@pytest.mark.parametrize("init_integration", ["DS-2CD2146G2-ISU"], indirect=True)
+async def test_targeted_human_motion_captures_image_in_isolated_folder(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test targeted human detection saves image into isolated camera directory."""
+
+    entity_id = "binary_sensor.ds_2cd2146g2_isu00000000aawrg00000000_1_fielddetection"
+    image = b"human detection image"
+
+    view = EventNotificationsView(hass)
+    mock_request = mock_multipart_event_notification("fielddetection_human", image)
+    response = await view.post(mock_request)
+
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+    assert ATTR_LAST_IMAGE_PATH in sensor.attributes
+    image_path = Path(sensor.attributes[ATTR_LAST_IMAGE_PATH])
+    assert image_path.exists()
+    assert image_path.read_bytes() == image
+    # Verify folder path contains the device serial for camera isolation
+    assert "ds_2cd2146g2_isu" in str(image_path)
+    assert "channel_1" in str(image_path)
+

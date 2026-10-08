@@ -191,3 +191,64 @@ async def test_reauth(hass, mock_isapi, mock_config_entry: MockConfigEntry):
     assert result["reason"] == "reauth_successful"
     assert mock_config_entry.data[CONF_USERNAME] == TEST_CONFIG[CONF_USERNAME]
     assert mock_config_entry.data[CONF_PASSWORD] == TEST_CONFIG[CONF_PASSWORD]
+
+
+@pytest.mark.parametrize("init_integration", ["DS-2CD2386G2-IU"], indirect=True)
+async def test_options_flow(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:
+    """Test options flow for camera device entry."""
+    entry = init_integration
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "image_retention": 14,
+            "image_capture_movement": True,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["image_retention"] == 14
+    assert entry.options["image_capture_movement"] is True
+
+
+async def test_global_settings_options_flow(hass: HomeAssistant) -> None:
+    """Test options flow for global settings entry."""
+    from custom_components.hikvision_next import get_global_settings_entry
+    from custom_components.hikvision_next.const import CONF_SHOW_SIDEBAR_PANEL, DOMAIN
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    camera_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="camera_serial_123",
+        data={"host": "192.168.1.10"},
+    )
+    camera_entry.add_to_hass(hass)
+
+    # Trigger system step to create global settings entry
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "system"},
+        data={},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    global_entry = get_global_settings_entry(hass)
+    assert global_entry is not None
+    assert global_entry.title == "⚙️ Global Settings"
+
+    # Test options flow on global entry
+    opt_result = await hass.config_entries.options.async_init(global_entry.entry_id)
+    assert opt_result["type"] is FlowResultType.FORM
+    assert opt_result["step_id"] == "init"
+
+    configure_result = await hass.config_entries.options.async_configure(
+        opt_result["flow_id"],
+        user_input={
+            CONF_SHOW_SIDEBAR_PANEL: False,
+        },
+    )
+    assert configure_result["type"] is FlowResultType.CREATE_ENTRY
+    assert global_entry.options[CONF_SHOW_SIDEBAR_PANEL] is False

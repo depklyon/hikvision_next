@@ -37,6 +37,8 @@ async def async_setup_entry(
             if event.id in ("motiondetection", "fielddetection", "linedetection", "regionentrance", "regionexiting"):
                 entities.append(TargetBinarySensor(device, camera.id, event, "human"))
                 entities.append(TargetBinarySensor(device, camera.id, event, "vehicle"))
+                if event.id == "motiondetection":
+                    entities.append(TargetBinarySensor(device, camera.id, event, "movement"))
 
     # General Events
     for event in device.events_info:

@@ -29,11 +29,27 @@
   "options": {
     "step": {
       "init": {
+        "title": "Options",
+        "description": "Configure options for this device or integration.",
         "data": {
-          "image_retention": "Image retention (days)"
+          "show_sidebar_panel": "Show sidebar panel",
+          "image_retention": "Image retention (days)",
+          "image_capture_movement": "Save images for untargeted movement (leaves, vegetation, shadows)"
         },
         "data_description": {
-          "image_retention": "Number of days to keep event images in the media folder (0 = keep only latest/overwrite, 7 = default)"
+          "show_sidebar_panel": "Show the Hikvision Events timeline page in the Home Assistant sidebar menu.",
+          "image_retention": "Number of days to keep event images in the media folder (0 = keep only latest/overwrite, 7 = default)",
+          "image_capture_movement": "When disabled, motion events without a classified target (such as wind blowing leaves or moving vegetation) will not save images or schedule snapshots, preventing image storage flooding."
+        }
+      },
+      "global": {
+        "title": "⚙️ Global Settings",
+        "description": "Configure global options for the Hikvision integration.",
+        "data": {
+          "show_sidebar_panel": "Show sidebar panel"
+        },
+        "data_description": {
+          "show_sidebar_panel": "Show the Hikvision Events timeline page in the Home Assistant sidebar menu."
         }
       }
     }

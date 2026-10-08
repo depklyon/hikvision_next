@@ -41,6 +41,30 @@
                     "containerPath": "/app"
                 }]
             }
+        },
+        {
+            "label": "HA Dev: Start",
+            "type": "shell",
+            "command": "docker compose -f docker-compose.dev.yml up -d",
+            "problemMatcher": []
+        },
+        {
+            "label": "HA Dev: Stop",
+            "type": "shell",
+            "command": "docker compose -f docker-compose.dev.yml down",
+            "problemMatcher": []
+        },
+        {
+            "label": "HA Dev: Restart",
+            "type": "shell",
+            "command": "docker compose -f docker-compose.dev.yml restart",
+            "problemMatcher": []
+        },
+        {
+            "label": "HA Dev: View Logs",
+            "type": "shell",
+            "command": "docker compose -f docker-compose.dev.yml logs -f",
+            "problemMatcher": []
         }
     ]
 }

@@ -1,0 +1,13 @@
+services:
+  homeassistant-dev:
+    container_name: ha-hikvision-dev
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./dev-config:/config
+      - ./custom_components/hikvision_next:/config/custom_components/hikvision_next
+      - ./media:/media
+    ports:
+      - "8123:8123"
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
