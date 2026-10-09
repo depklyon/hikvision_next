@@ -8,6 +8,7 @@ from http import HTTPStatus
 import ipaddress
 import logging
 from pathlib import Path
+import re
 import socket
 from urllib.parse import urlparse
 
@@ -158,34 +159,49 @@ class EventNotificationsView(HomeAssistantView):
             and not item.disabled_by
             and getattr(item, "runtime_data", None) is not None
         ]
-        instance_identifiers = []
-        entry = None
+        if not integration_entries:
+            raise ValueError(f"Cannot find ISAPI instance for device {device_ip}: no active integration entries")
+
         if len(integration_entries) == 1:
-            entry = integration_entries[0]
-        else:
-            # Search device by mac_address
+            return integration_entries[0].runtime_data
+
+        def _clean_mac(m: str | None) -> str:
+            return re.sub(r"[^a-f0-9]", "", str(m).lower()) if m else ""
+
+        def _clean_serial(s: str | None) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
+
+        alert_mac = _clean_mac(alert.mac)
+        alert_serial = _clean_serial(alert.device_serial_no)
+
+        # 1. Search device by MAC address (normalized, case-insensitive, ignoring separators)
+        if alert_mac:
             for item in integration_entries:
-                item_mac_address = item.runtime_data.device_info.mac_address
-                instance_identifiers.append(item_mac_address)
+                item_mac = _clean_mac(item.runtime_data.device_info.mac_address)
+                if item_mac and item_mac == alert_mac:
+                    return item.runtime_data
 
-                if item_mac_address == alert.mac:
-                    entry = item
-                    break
+        # 2. Search device by serial number
+        if alert_serial:
+            for item in integration_entries:
+                dev_serial = _clean_serial(item.runtime_data.device_info.serial_no)
+                if dev_serial and (dev_serial == alert_serial or dev_serial.endswith(alert_serial) or alert_serial.endswith(dev_serial)):
+                    return item.runtime_data
 
-            # Search device by ip_address
-            if not entry:
-                for item in integration_entries:
-                    url = item.runtime_data.host
-                    instance_identifiers.append(url)
+        # 3. Search device by IP address (matching request.remote or alert payload IP against device host)
+        for item in integration_entries:
+            url = item.runtime_data.host
+            configured_ip = self.get_ip(urlparse(url).hostname)
+            if configured_ip and (configured_ip == device_ip or (alert.ip_address and configured_ip == alert.ip_address)):
+                return item.runtime_data
 
-                    if self.get_ip(urlparse(url).hostname) == device_ip:
-                        entry = item
-                        break
-
-        if not entry:
-            raise ValueError(f"Cannot find ISAPI instance for device {device_ip} in {instance_identifiers}")
-
-        return entry.runtime_data
+        instance_identifiers = [
+            f"{item.runtime_data.device_info.serial_no} (MAC: {item.runtime_data.device_info.mac_address}, Host: {item.runtime_data.host})"
+            for item in integration_entries
+        ]
+        raise ValueError(
+            f"Cannot find ISAPI instance for device {device_ip} (alert MAC: {alert.mac}, Serial: {alert.device_serial_no}) in {instance_identifiers}"
+        )
 
     def get_ip(self, ip_string: str) -> str:
         """Return an IP if either hostname or IP is provided."""
@@ -203,7 +219,7 @@ class EventNotificationsView(HomeAssistantView):
         """Extract XML content from multipart request or from simple request."""
 
         content_length = getattr(request, "content_length", None)
-        if content_length is not None and content_length > MAX_EVENT_PAYLOAD_SIZE:
+        if isinstance(content_length, int) and content_length > MAX_EVENT_PAYLOAD_SIZE:
             raise web.HTTPRequestEntityTooLarge(
                 max_size=MAX_EVENT_PAYLOAD_SIZE,
                 actual_size=content_length,
@@ -438,6 +454,11 @@ class EventNotificationsView(HomeAssistantView):
                 ][0]
             except IndexError:
                 alert.channel_id = alert.channel_id - 32
+        elif (not alert.channel_id or alert.channel_id == 0) and alert.event_id != EVENT_IO:
+            if device and not device.device_info.is_nvr and device.cameras:
+                alert.channel_id = device.cameras[0].id
+            else:
+                alert.channel_id = 1
 
     def trigger_sensor(
         self,

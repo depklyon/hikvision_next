@@ -85,3 +85,58 @@ async def test_update_notification_hosts_from_ipaddress_to_hostname(mock_isapi):
     await isapi.set_alarm_server("https://ha.hostname.domain", "/api/hikvision")
 
     assert endpoint.called
+
+
+def test_parse_event_notification_suffixed_event():
+    """Test parsing alert XML with suffixed event types like facedetection-1."""
+    from custom_components.hikvision_next.isapi.isapi import ISAPIClient
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<EventNotificationAlert version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+    <ipAddress>1.0.0.18</ipAddress>
+    <portNo>8123</portNo>
+    <protocol>HTTP</protocol>
+    <macAddress>DD:73:4A:29:96:F1</macAddress>
+    <channelID>1</channelID>
+    <dateTime>2026-10-08T21:00:00-03:00</dateTime>
+    <activePostCount>1</activePostCount>
+    <eventType>facedetection-1</eventType>
+    <eventState>active</eventState>
+    <eventDescription>Face detection alarm</eventDescription>
+</EventNotificationAlert>"""
+
+    alert = ISAPIClient.parse_event_notification(xml)
+    assert alert.event_id == "facedetection"
+    assert alert.channel_id == 1
+    assert alert.mac == "DD:73:4A:29:96:F1"
+    assert alert.ip_address == "1.0.0.18"
+
+
+@respx.mock
+async def test_get_supported_events_with_suffixed_trigger(mock_isapi):
+    """Test get_supported_events with facedetection-1 trigger from camera."""
+    isapi = mock_isapi
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<EventTriggerList version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+    <EventTrigger>
+        <id>facedetection-1</id>
+        <eventType>facedetection-1</eventType>
+        <videoInputChannelID>1</videoInputChannelID>
+        <EventTriggerNotificationList>
+            <EventTriggerNotification>
+                <notificationMethod>center</notificationMethod>
+            </EventTriggerNotification>
+        </EventTriggerNotificationList>
+    </EventTrigger>
+</EventTriggerList>"""
+
+    url = f"{isapi.host}/ISAPI/Event/triggers"
+    respx.get(url).mock(return_value=httpx.Response(200, text=xml_content))
+
+    events = await isapi.get_supported_events({})
+    assert len(events) == 1
+    assert events[0].id == "facedetection"
+    assert events[0].channel_id == 1
+    assert events[0].url == "Smart/FaceDetection/1"
+    assert "center" in events[0].notifications

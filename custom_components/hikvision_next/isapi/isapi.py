@@ -50,6 +50,24 @@ Node = dict[str, Any]
 _LOGGER = logging.getLogger(__name__)
 
 
+def normalize_event_id(raw_event_id: str | None) -> str:
+    """Normalize event ID by mapping alternates and stripping channel suffixes."""
+    if not raw_event_id:
+        return ""
+    eid = str(raw_event_id).lower().strip()
+    if eid in EVENTS_ALTERNATE_ID:
+        return EVENTS_ALTERNATE_ID[eid]
+    if eid in EVENTS:
+        return eid
+    # Strip trailing channel suffix (e.g. facedetection-1 -> facedetection, vmd-1 -> vmd)
+    base = re.sub(r"-\d+$", "", eid)
+    if base in EVENTS_ALTERNATE_ID:
+        return EVENTS_ALTERNATE_ID[base]
+    if base in EVENTS:
+        return base
+    return eid
+
+
 class ISAPIClient:
     """Hikvision ISAPI client."""
 
@@ -246,10 +264,7 @@ class ISAPIClient:
             event_type = event_trigger.get("eventType")
             if not event_type:
                 return None
-            event_id = event_type.lower()
-            # Translate to alternate IDs
-            if event_id in EVENTS_ALTERNATE_ID:
-                event_id = EVENTS_ALTERNATE_ID[event_id]
+            event_id = normalize_event_id(event_type)
 
             if event_id == EVENT_PIR:
                 is_supported = str_to_bool(deep_get(system_capabilities, "WLAlarmCap.isSupportPIR", False))
@@ -270,7 +285,13 @@ class ISAPIClient:
                 if not channel_id:
                     channel_id = int(event_trigger.get("dynVideoInputChannelID", 0))
                     is_proxy = channel_id > 0
-                
+
+                # Check for channel suffix in event_type or trigger id (e.g. facedetection-1)
+                if not channel_id:
+                    trigger_id = str(event_trigger.get("id", ""))
+                    if ch_match := (re.search(r"-(\d+)$", str(event_type)) or re.search(r"-(\d+)$", trigger_id)):
+                        channel_id = int(ch_match.group(1))
+
                 # Some Hikvision smart events (like VMDHumanVehicle) omit the channel ID.
                 # If it's a video event and channel is still 0, default to 1.
                 if not channel_id:
@@ -685,18 +706,46 @@ class ISAPIClient:
         if not event_id or event_id == "duration":
             # <EventNotificationAlert version="2.0"
             event_id = alert["DurationList"]["Duration"]["relationEvent"]
-        event_id = event_id.lower()
 
-        # handle alternate event type
-        if EVENTS_ALTERNATE_ID.get(event_id):
-            event_id = EVENTS_ALTERNATE_ID[event_id]
+        # Normalize event type (handles alternates and channel suffixes like facedetection-1)
+        event_id = normalize_event_id(event_id)
 
         channel_id = int(alert.get("channelID", alert.get("dynChannelID", 0)))
         io_port_id = int(alert.get("inputIOPortID", 0))
-        # <EventNotificationAlert version="1.0"
-        device_serial = deep_get(alert, "Extensions.serialNumber.#text")
-        # <EventNotificationAlert version="2.0"
+
+        # Check for channel suffix in raw eventType if channel_id is 0
+        raw_event_type = str(alert.get("eventType", ""))
+        if not channel_id and raw_event_type:
+            if ch_match := re.search(r"-(\d+)$", raw_event_type):
+                channel_id = int(ch_match.group(1))
+
+        # Extract device serial number (checking various Hikvision XML structures)
+        device_serial = (
+            deep_get(alert, "Extensions.serialNumber.#text")
+            or deep_get(alert, "Extensions.serialNumber")
+            or alert.get("serialNumber")
+            or alert.get("subSerialNumber")
+            or alert.get("deviceID")
+        )
+        if isinstance(device_serial, dict):
+            device_serial = device_serial.get("#text")
+        if device_serial:
+            device_serial = str(device_serial).strip()
+
+        # Extract MAC address (handle text or dict)
         mac = alert.get("macAddress")
+        if isinstance(mac, dict):
+            mac = mac.get("#text")
+        if mac:
+            mac = str(mac).strip()
+
+        # Extract IP address from payload if present
+        ip_addr = alert.get("ipAddress")
+        if isinstance(ip_addr, dict):
+            ip_addr = ip_addr.get("#text")
+        if ip_addr:
+            ip_addr = str(ip_addr).strip()
+
         event_state = str(alert.get("eventState", "active")).lower()
 
         # Extract detection targets from root <targetType> or <DetectionRegionList>
@@ -705,7 +754,10 @@ class ISAPIClient:
 
         # Check root <targetType> (e.g. AcuSense VMD/motion)
         if root_target := alert.get("targetType"):
-            raw_targets.append(root_target)
+            if isinstance(root_target, dict):
+                root_target = root_target.get("#text")
+            if root_target:
+                raw_targets.append(root_target)
 
         # Check DetectionRegionList (single entry dict or multiple entry list)
         region_entries = deep_get(alert, "DetectionRegionList.DetectionRegionEntry", [])
@@ -717,8 +769,13 @@ class ISAPIClient:
         for entry in region_entries:
             if isinstance(entry, dict):
                 if entry_target := entry.get("detectionTarget"):
-                    raw_targets.append(entry_target)
+                    if isinstance(entry_target, dict):
+                        entry_target = entry_target.get("#text")
+                    if entry_target:
+                        raw_targets.append(entry_target)
                 if not region_id and (entry_region := entry.get("regionID")):
+                    if isinstance(entry_region, dict):
+                        entry_region = entry_region.get("#text", 0)
                     try:
                         region_id = int(entry_region)
                     except (ValueError, TypeError):
@@ -742,7 +799,7 @@ class ISAPIClient:
 
         detection_target = normalized_targets[0] if normalized_targets else None
 
-        if not EVENTS[event_id]:
+        if event_id not in EVENTS:
             raise ValueError(f"Unsupported event {event_id}")
 
         return AlertInfo(
@@ -755,6 +812,7 @@ class ISAPIClient:
             detection_target=detection_target,
             event_state=event_state,
             detection_targets=normalized_targets,
+            ip_address=ip_addr,
         )
 
     async def get_camera_image(

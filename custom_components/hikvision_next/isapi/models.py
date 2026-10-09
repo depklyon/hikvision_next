@@ -25,6 +25,7 @@ class AlertInfo:
     detection_target: str = field(default=None)
     event_state: str = "active"
     detection_targets: list[str] = field(default_factory=list)
+    ip_address: str = field(default=None)
 
 
 @dataclass

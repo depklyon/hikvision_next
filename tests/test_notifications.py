@@ -396,3 +396,77 @@ async def test_targeted_human_motion_captures_image_in_isolated_folder(
     assert "ds_2cd2146g2_isu" in str(image_path)
     assert "channel_1" in str(image_path)
 
+
+@pytest.mark.parametrize("init_integration", ["DS-2CD2386G2-IU"], indirect=True)
+async def test_alert_with_omitted_channel_id_triggers_sensor(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test incoming event without channel ID defaults to camera channel 1."""
+    entity_id = "binary_sensor.ds_2cd2386g2_iu00000000aawrj00000000_1_fielddetection"
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_OFF
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<EventNotificationAlert version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+    <ipAddress>1.0.0.255</ipAddress>
+    <portNo>8123</portNo>
+    <protocol>HTTP</protocol>
+    <macAddress>a6:63:9e:f8:01:09</macAddress>
+    <channelID>0</channelID>
+    <dateTime>2026-10-08T21:00:00-03:00</dateTime>
+    <activePostCount>1</activePostCount>
+    <eventType>fielddetection</eventType>
+    <eventState>active</eventState>
+    <eventDescription>fielddetection alarm</eventDescription>
+</EventNotificationAlert>"""
+
+    view = EventNotificationsView(hass)
+    mock_request = MagicMock()
+    mock_request.headers = {"Content-Type": "application/xml"}
+    mock_request.remote = TEST_HOST_IP
+    async def read():
+        return xml.encode()
+    mock_request.read = read
+
+    response = await view.post(mock_request)
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+
+
+@pytest.mark.parametrize("init_integration", ["DS-2CD2386G2-IU"], indirect=True)
+async def test_alert_mac_case_insensitive_matching(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Test device matching succeeds with uppercase MAC address."""
+    entity_id = "binary_sensor.ds_2cd2386g2_iu00000000aawrj00000000_1_fielddetection"
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<EventNotificationAlert version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+    <ipAddress>1.0.0.255</ipAddress>
+    <portNo>8123</portNo>
+    <protocol>HTTP</protocol>
+    <macAddress>A6:63:9E:F8:01:09</macAddress>
+    <channelID>1</channelID>
+    <dateTime>2026-10-08T21:00:00-03:00</dateTime>
+    <activePostCount>1</activePostCount>
+    <eventType>fielddetection</eventType>
+    <eventState>active</eventState>
+    <eventDescription>fielddetection alarm</eventDescription>
+</EventNotificationAlert>"""
+
+    view = EventNotificationsView(hass)
+    mock_request = MagicMock()
+    mock_request.headers = {"Content-Type": "application/xml"}
+    mock_request.remote = "172.17.0.1"  # Simulated docker bridge IP
+    async def read():
+        return xml.encode()
+    mock_request.read = read
+
+    response = await view.post(mock_request)
+    assert response.status == HTTPStatus.OK
+    assert (sensor := hass.states.get(entity_id))
+    assert sensor.state == STATE_ON
+
