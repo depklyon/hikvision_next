@@ -170,10 +170,10 @@
     },
     "image": {
       "snapshot": {
-        "name": "{camera} Snapshot"
+        "name": "[Image] {camera} Snapshot"
       },
       "event_image": {
-        "name": "{event} Last Image"
+        "name": "[Image] {event}"
       }
     }
   },

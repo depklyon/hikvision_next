@@ -121,7 +121,10 @@
     },
     "image": {
       "snapshot": {
-        "name": "{camera} zdjęcie"
+        "name": "[Image] {camera} zdjęcie"
+      },
+      "event_image": {
+        "name": "[Image] {event}"
       }
     }
   }
