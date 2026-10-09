@@ -6,18 +6,21 @@ The Home Assistant integration for Hikvision NVRs and IP cameras. Receives and s
 
 ## Features
 
+- **Interactive Event Timeline Panel**: Dedicated Home Assistant sidebar panel to browse event snapshots across cameras, filter by target (Human / Vehicle / Movement) and date, with filmstrip navigation, HUD overlay, image download, and admin deletion controls.
 - Camera entities for main and sub streams
-- Real-time Acusense events notifications through binary sensors and HA events (hikvision_next_event)
-- **NEW**: Separate Target binary sensors for Human/Vehicle detection (on supported Smart events)
-- Switches for Acusense events detection
+- Real-time Acusense event notifications via binary sensors and HA events (`hikvision_next_event`)
+- **Target Binary Sensors & Device Triggers**: Dedicated sensors and automation triggers for Human and Vehicle detection (on supported Smart events)
+- Switches for Acusense event detection
 - Switches for NVR Outputs and PIR sensor
-- Holiday mode switch (allows to switch continuous recording with appropriate NVR setup)
-- Image entities for the latest snapshots
-- **NEW**: Rolling buffer for event snapshots based on customizable Image Retention config option
+- Holiday mode switch (allows toggling continuous recording with appropriate NVR setup)
+- Image entities for event snapshots with SVG placeholder when no alerts have occurred
+- **Configurable Image Retention**: Rolling buffer by snapshot count and automatic pruning by age (retention days)
+- Multi-channel camera and NVR channel mapping support
 - Tracking HDD and NAS status
 - Tracking Notifications Host settings for diagnostic purposes
 - Remote reboot device
 - Basic and digest authentication support
+- **Built-in Security Hardening**: Strict path containment checks, admin-only deletion authorization, frontend XSS escaping, and request payload size limits
 
 ### Supported events
 
@@ -54,7 +57,9 @@ Creates an automation that allows to display text overlay on a selected video st
 
 You can configure options for this integration by navigating to **Settings > Devices & Services**, finding the Hikvision NVR / IP Camera integration, and clicking **Configure**.
 
-*   **Image Retention Count**: Sets the number of event images (snapshots) to keep on disk. Defaults to 1 (overwriting the previous image). If set higher, images are saved with timestamps (e.g. `motiondetection_YYYYMMDD_HHMMSS.jpeg`) and a rolling buffer is maintained.
+*   **Show Timeline Panel in Sidebar**: Toggle whether to show the Hikvision Event Timeline panel in the Home Assistant sidebar (enabled by default).
+*   **Image Retention Count**: Sets the maximum number of event snapshots to keep per event/channel on disk. Defaults to 1 (overwriting the previous image). When set higher, images are preserved with timestamped filenames (`<event>_YYYYMMDD_HHMMSS.jpeg`) in a rolling buffer.
+*   **Image Retention Days**: Number of days to keep event images before automatic cleanup (defaults to 7 days). Set to 0 to disable age-based pruning.
 
 ## Preview
 

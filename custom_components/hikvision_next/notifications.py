@@ -93,6 +93,9 @@ class StoredEventImage:
     all_urls: list[str] = field(default_factory=list)
 
 
+MAX_EVENT_PAYLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
 class EventNotificationsView(HomeAssistantView):
     """Event notifications listener."""
 
@@ -199,7 +202,21 @@ class EventNotificationsView(HomeAssistantView):
     async def parse_event_request(self, request: web.Request) -> EventRequestContent:
         """Extract XML content from multipart request or from simple request."""
 
+        content_length = getattr(request, "content_length", None)
+        if content_length is not None and content_length > MAX_EVENT_PAYLOAD_SIZE:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_EVENT_PAYLOAD_SIZE,
+                actual_size=content_length,
+                text="Event payload exceeds allowed limit",
+            )
+
         data = await request.read()
+        if len(data) > MAX_EVENT_PAYLOAD_SIZE:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_EVENT_PAYLOAD_SIZE,
+                actual_size=len(data),
+                text="Event payload exceeds allowed limit",
+            )
 
         content_type_header = request.headers.get(CONTENT_TYPE, "").strip()
 
@@ -308,8 +325,10 @@ class EventNotificationsView(HomeAssistantView):
 
             now = dt_util.utcnow()
             timestamp_str = now.strftime("%Y%m%d_%H%M%S_%f")
-            target_label = alert.detection_target or (alert.detection_targets[0] if alert.detection_targets else None)
+            raw_target = alert.detection_target or (alert.detection_targets[0] if alert.detection_targets else None)
+            target_label = slugify(str(raw_target)) if raw_target else None
             target_suffix = f"_{target_label}" if target_label else ""
+            safe_event_id = slugify(str(alert.event_id))
 
             saved_paths: list[str] = []
             saved_urls: list[str] = []
@@ -319,8 +338,9 @@ class EventNotificationsView(HomeAssistantView):
             primary_size = len(images[0].content)
 
             for idx, img in enumerate(images):
+                safe_ext = slugify(str(img.extension)) or "jpeg"
                 suffix = f"_{idx + 1}" if len(images) > 1 else ""
-                filename = f"{alert.event_id}{target_suffix}_{timestamp_str}{suffix}.{img.extension}"
+                filename = f"{safe_event_id}{target_suffix}_{timestamp_str}{suffix}.{safe_ext}"
 
                 media_path = media_dir / filename
                 www_path = www_dir / filename

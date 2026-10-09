@@ -8,6 +8,7 @@ from http import HTTPStatus
 import ipaddress
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 from urllib.parse import quote, urljoin, urlparse
 
@@ -734,7 +735,8 @@ class ISAPIClient:
         }
         normalized_targets: list[str] = []
         for t in raw_targets:
-            norm = target_mapping.get(str(t).lower().strip(), str(t).lower().strip())
+            raw_val = str(t).lower().strip()
+            norm = target_mapping.get(raw_val, re.sub(r"[^a-z0-9_]", "", raw_val))
             if norm and norm not in normalized_targets:
                 normalized_targets.append(norm)
 

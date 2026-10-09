@@ -85,6 +85,12 @@ class SnapshotFile(ImageEntity):
         """Return bytes of image."""
         try:
             if self.file_path:
+                if not self.hass.config.is_allowed_path(self.file_path):
+                    _LOGGER.warning(
+                        "Path %s is not in allowed directories",
+                        self.file_path,
+                    )
+                    return None
                 with open(self.file_path, "rb") as file:
                     return file.read()
         except FileNotFoundError:
@@ -170,7 +176,11 @@ class EventImage(ImageEntity):
         if event.data.get("unique_id") != self.unique_id:
             return
         if path_str := event.data.get("path"):
-            self._current_path = Path(path_str)
+            candidate = Path(path_str).resolve()
+            media_root = (get_media_dir(self.hass) / DOMAIN).resolve()
+            www_root = Path(self.hass.config.path("www", DOMAIN)).resolve()
+            if candidate.is_relative_to(media_root) or candidate.is_relative_to(www_root):
+                self._current_path = candidate
         self._attr_image_last_updated = dt_util.utcnow()
         self.async_write_ha_state()
 

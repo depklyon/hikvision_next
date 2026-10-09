@@ -201,8 +201,11 @@ class HikvisionTimelinePanel extends HTMLElement {
     if (!confirm(`Delete image captured on ${cur.formatted_date} ${cur.formatted_time}?`)) return;
 
     try {
+      const serial = encodeURIComponent(cur.device_serial || 'default');
+      const channel = encodeURIComponent(cur.channel_id);
+      const fname = encodeURIComponent(cur.filename);
       const res = await this._hass.fetchWithAuth(
-        `/api/hikvision_next/event/${cur.device_serial || 'default'}/${cur.channel_id}/${cur.filename}`,
+        `/api/hikvision_next/event/${serial}/${channel}/${fname}`,
         { method: 'DELETE' }
       );
       if (res.ok) {
@@ -237,7 +240,7 @@ class HikvisionTimelinePanel extends HTMLElement {
 
     const badgeEl = this.shadowRoot.querySelector('#hud-target-badge');
     if (badgeEl) {
-      badgeEl.className = `target-badge badge-${cur.target}`;
+      badgeEl.className = `target-badge badge-${this.escapeHtml(cur.target)}`;
       badgeEl.innerHTML = this.renderTargetBadgeContent(cur.target);
     }
 
@@ -263,11 +266,21 @@ class HikvisionTimelinePanel extends HTMLElement {
     });
   }
 
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   renderTargetBadgeContent(target) {
     if (target === 'human') return '👤 Human';
     if (target === 'vehicle') return '🚗 Vehicle';
     if (target === 'movement') return '🍃 Movement';
-    return `⚡ ${target}`;
+    return `⚡ ${this.escapeHtml(target)}`;
   }
 
   renderControls() {
@@ -747,7 +760,7 @@ class HikvisionTimelinePanel extends HTMLElement {
           <!-- Camera selector -->
           <select class="custom-select" id="select-camera">
             <option value="all">All Cameras</option>
-            ${cameras.map(c => `<option value="${c.key}" ${this.selectedCamera === c.key ? 'selected' : ''}>${c.label}</option>`).join('')}
+            ${cameras.map(c => `<option value="${this.escapeHtml(c.key)}" ${this.selectedCamera === c.key ? 'selected' : ''}>${this.escapeHtml(c.label)}</option>`).join('')}
           </select>
 
           <!-- Date filter -->
@@ -766,18 +779,18 @@ class HikvisionTimelinePanel extends HTMLElement {
       <!-- MAIN STAGE PLAYER -->
       <div class="stage-container">
         ${cur ? `
-          <img class="stage-image" id="stage-image" src="${cur.url}" alt="Event snapshot" />
+          <img class="stage-image" id="stage-image" src="${this.escapeHtml(cur.url)}" alt="Event snapshot" />
           <div class="hud-overlay">
             <div class="hud-top">
-              <div class="hud-card" id="hud-title">${cur.camera_label || `${cur.camera_name} • Ch ${cur.channel_id}`}</div>
+              <div class="hud-card" id="hud-title">${this.escapeHtml(cur.camera_label || `${cur.camera_name} • Ch ${cur.channel_id}`)}</div>
               <div class="hud-card">
-                <span class="target-badge badge-${cur.target}" id="hud-target-badge">
+                <span class="target-badge badge-${this.escapeHtml(cur.target)}" id="hud-target-badge">
                   ${this.renderTargetBadgeContent(cur.target)}
                 </span>
               </div>
             </div>
             <div class="hud-bottom">
-              <div class="hud-card" id="hud-time">${cur.formatted_date} ${cur.formatted_time}</div>
+              <div class="hud-card" id="hud-time">${this.escapeHtml(cur.formatted_date)} ${this.escapeHtml(cur.formatted_time)}</div>
               <div class="hud-card" id="hud-counter">${this.currentIndex + 1} / ${total}</div>
             </div>
           </div>
@@ -820,7 +833,7 @@ class HikvisionTimelinePanel extends HTMLElement {
 
         <div class="playback-buttons">
           ${cur ? `
-            <a href="${cur.url}" download="${cur.filename}" class="ctrl-btn" title="Download Image" target="_blank">⬇</a>
+            <a href="${this.escapeHtml(cur.url)}" download="${this.escapeHtml(cur.filename)}" class="ctrl-btn" title="Download Image" target="_blank">⬇</a>
             <button class="ctrl-btn" id="btn-delete" title="Delete Image">🗑</button>
           ` : ''}
           <button class="ctrl-btn" id="btn-fs" title="Fullscreen (F)">⛶</button>
@@ -837,12 +850,12 @@ class HikvisionTimelinePanel extends HTMLElement {
           <div class="filmstrip-track">
             ${this.filteredEvents.map((e, idx) => `
               <div class="thumb-card ${idx === this.currentIndex ? 'active' : ''}" data-idx="${idx}">
-                <img src="${e.url}" loading="lazy" alt="thumb" />
+                <img src="${this.escapeHtml(e.url)}" loading="lazy" alt="thumb" />
                 <div class="thumb-overlay">
-                  <span class="thumb-badge badge-${e.target}">
+                  <span class="thumb-badge badge-${this.escapeHtml(e.target)}">
                     ${e.target === 'human' ? '👤' : (e.target === 'vehicle' ? '🚗' : '🍃')}
                   </span>
-                  <span class="thumb-time">${e.formatted_time}</span>
+                  <span class="thumb-time">${this.escapeHtml(e.formatted_time)}</span>
                 </div>
               </div>
             `).join('')}

@@ -115,6 +115,7 @@ async def test_timeline_events_and_image_views(
     )
     from custom_components.hikvision_next.const import CONF_SHOW_SIDEBAR_PANEL, PANEL_URL_PATH
     from homeassistant.components.frontend import DATA_PANELS
+    from aiohttp import web
 
     assert should_show_sidebar_panel(hass) is True
     await async_update_sidebar_panel(hass)
@@ -134,3 +135,40 @@ async def test_timeline_events_and_image_views(
     assert should_show_sidebar_panel(hass) is False
     await async_update_sidebar_panel(hass)
     assert PANEL_URL_PATH not in hass.data.get(DATA_PANELS, {})
+
+    # --- Security Hardening Tests ---
+    # 1. Invalid / Traversal parameter validation on image view
+    with pytest.raises(web.HTTPBadRequest):
+        await image_view.get(mock_request, "../etc", "1", "test.jpeg")
+
+    with pytest.raises(web.HTTPBadRequest):
+        await image_view.get(mock_request, serial, "invalid_channel", "test.jpeg")
+
+    with pytest.raises(web.HTTPBadRequest):
+        await image_view.get(mock_request, serial, "1", "../test.jpeg")
+
+    # 2. Deletion view authorization and containment
+    delete_view = HikvisionDeleteEventView(hass)
+    non_admin_req = MagicMock()
+    non_admin_req.get = MagicMock(return_value=MagicMock(is_admin=False))
+
+    with pytest.raises(web.HTTPForbidden):
+        await delete_view.delete(non_admin_req, serial, str(channel), test_filename)
+
+    # Admin request without valid permissions or invalid path
+    admin_user = MagicMock(is_admin=True)
+    admin_req = MagicMock()
+    admin_req.get = MagicMock(side_effect=lambda key, default=None: admin_user if key == "hass_user" else default)
+
+    with pytest.raises(web.HTTPBadRequest):
+        await delete_view.delete(admin_req, "../traversal", "1", "file.jpeg")
+
+    # Admin successful deletion
+    del_resp = await delete_view.delete(admin_req, serial, str(channel), test_filename)
+    assert del_resp.status == HTTPStatus.OK
+    assert not (media_dir / test_filename).exists()
+
+    # Deletion of non-existent file returns 404
+    with pytest.raises(web.HTTPNotFound):
+        await delete_view.delete(admin_req, serial, str(channel), test_filename)
+
